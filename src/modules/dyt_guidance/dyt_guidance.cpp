@@ -139,6 +139,7 @@ private:
 	bool target_lock_candidate() const;
 	bool target_usable() const;
 	bool intercept_allowed() const;
+	bool vehicle_control_active() const;
 
 	TrackProfile follow_profile() const;
 	TrackProfile intercept_profile() const;
@@ -241,6 +242,7 @@ private:
 		(ParamInt<px4::params::DYTG_ACT_AUX>) _param_act_aux,
 		(ParamInt<px4::params::DYTG_ACT_BTN>) _param_act_btn,
 		(ParamInt<px4::params::DYTG_INT_AUX>) _param_int_aux,
+		(ParamInt<px4::params::DYTG_COOP_EN>) _param_coop_enable,
 		(ParamFloat<px4::params::DYTG_STK_TK>) _param_stick_takeover,
 		(ParamInt<px4::params::DYTG_AUTO_EN>) _param_auto_enable,
 		(ParamInt<px4::params::DYTG_AUTO_N>) _param_auto_frames,
@@ -320,6 +322,8 @@ int DytGuidance::print_status()
 void DytGuidance::show_status()
 {
 	PX4_INFO("state: %u", static_cast<unsigned>(_state));
+	PX4_INFO("coop handoff: en=%ld controlling_vehicle=%d",
+		 static_cast<long>(_param_coop_enable.get()), vehicle_control_active());
 	PX4_INFO("target fresh: %d", target_fresh());
 	PX4_INFO("target locked: %d", target_locked());
 	PX4_INFO("target geometry: %d", target_geometry_valid());
@@ -690,6 +694,23 @@ bool DytGuidance::intercept_allowed() const
 	return _los_body_latest(0) > cone_cos;
 }
 
+bool DytGuidance::vehicle_control_active() const
+{
+	// States where the seeker would command aircraft motion (trajectory/offboard setpoints).
+	const bool tracking = (_state == TaskState::TrackFollow || _state == TaskState::TrackIntercept);
+
+	if (_param_coop_enable.get() > 0) {
+		// Cooperative handoff: the seeker only drives the aircraft while it is actively
+		// tracking a locked target. While searching or after losing the lock it commands
+		// the gimbal only and leaves aircraft motion to the position-sharing follower, so
+		// the two controllers never publish setpoints simultaneously.
+		return tracking;
+	}
+
+	// Standalone: the seeker owns aircraft motion in every active state (hold while searching).
+	return _state != TaskState::Idle && _state != TaskState::Abort;
+}
+
 DytGuidance::TrackProfile DytGuidance::follow_profile() const
 {
 	return {_param_n_follow.get(), _param_v_follow.get(), _param_ka_follow.get(), _param_kv_follow.get(),
@@ -910,6 +931,7 @@ void DytGuidance::publish_status()
 
 	status.lost_reason = _lost_reason;
 	status.active = _state != TaskState::Idle && _state != TaskState::Abort;
+	status.controlling_vehicle = vehicle_control_active();
 	status.target_locked = target_locked();
 	status.target_fresh = target_fresh();
 	status.intercept_allowed = intercept_allowed();
@@ -1572,9 +1594,15 @@ void DytGuidance::Run()
 	}
 
 	if (_state == TaskState::SearchWaitLock || _state == TaskState::LostHold) {
-		request_offboard_mode();
-		publish_offboard_mode(true);
-		publish_hold_setpoint();
+		// In cooperative mode the seeker only drives the gimbal while searching / lost;
+		// aircraft motion is left to the cooperative_rendezvous position-sharing follower,
+		// so we must not publish trajectory/offboard setpoints here (avoids fighting over
+		// the shared trajectory_setpoint topic).
+		if (_param_coop_enable.get() <= 0) {
+			request_offboard_mode();
+			publish_offboard_mode(true);
+			publish_hold_setpoint();
+		}
 	}
 
 	if (_state == TaskState::TrackFollow) {

@@ -40,6 +40,23 @@ PARAM_DEFINE_INT32(DYTG_ACT_BTN, -1);
 PARAM_DEFINE_INT32(DYTG_INT_AUX, 2);
 
 /**
+ * Cooperative rendezvous handoff enable
+ *
+ * When enabled, the DYT seeker only commands aircraft motion (trajectory /
+ * offboard setpoints) while the camera is locked and tracking. While searching
+ * or after losing the lock, the seeker controls the gimbal only and leaves the
+ * aircraft motion to the cooperative_rendezvous position-sharing follower, so
+ * the two controllers never publish setpoints at the same time.
+ *
+ * Disable for standalone seeker operation (the seeker then holds position while
+ * searching, as before).
+ *
+ * @boolean
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_INT32(DYTG_COOP_EN, 0);
+
+/**
  * Manual takeover stick threshold
  *
  * @min 0.05

@@ -1,0 +1,7 @@
+menuconfig DRIVERS_VISUAL_MAVLINK_TEST
+	bool "visual_mavlink_test"
+	default n
+	---help---
+		Enable support for the visual_mavlink_test module, a minimal MAVLink
+		round-trip test used to verify ground station <-> vehicle communication
+		for both the simulation vehicle and the real flight controller.

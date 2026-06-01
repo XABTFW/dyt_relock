@@ -65,6 +65,10 @@ private:
 	static constexpr float FRAME_YAW_MAX_DEG{110.f};
 	static constexpr float FRAME_PITCH_MIN_DEG{-100.f};
 	static constexpr float FRAME_PITCH_MAX_DEG{40.f};
+	static constexpr float MIDCOURSE_RESEND_ANGLE_DELTA_DEG{0.5f};
+	static constexpr int MIDCOURSE_BURST_COUNT{3};
+	static constexpr hrt_abstime MIDCOURSE_BURST_INTERVAL{40_ms};
+	static constexpr hrt_abstime MIDCOURSE_HOLD_INTERVAL{100_ms};
 	static constexpr int SEARCH_CENTER_PASSES{2};
 	static constexpr hrt_abstime MANUAL_TAKEOVER_GRACE{500_ms};
 
@@ -205,8 +209,10 @@ private:
 	float _scan_yaw_deg{0.f};
 	float _scan_pitch_deg{0.f};
 	hrt_abstime _next_midcourse_point_time{0};
+	hrt_abstime _last_midcourse_point_time{0};
 	float _midcourse_yaw_deg{NAN};
 	float _midcourse_pitch_deg{NAN};
+	int _midcourse_burst_remaining{0};
 
 	LosObservation _observations[OBS_BUFFER_LEN]{};
 	int _observation_count{0};
@@ -1018,10 +1024,16 @@ void DytGuidance::enter_state(TaskState new_state, uint8_t lost_reason)
 		_auto_lock_streak = 0;
 		_auto_lock_last_sample_time = 0;
 		_next_midcourse_point_time = 0;
+		_last_midcourse_point_time = 0;
+		_midcourse_burst_remaining = 0;
+		_midcourse_yaw_deg = NAN;
+		_midcourse_pitch_deg = NAN;
 	} else if (new_state == TaskState::TrackFollow || new_state == TaskState::TrackIntercept) {
 		_next_scan_time = 0;
 		_search_pause_until = 0;
 		_next_midcourse_point_time = 0;
+		_last_midcourse_point_time = 0;
+		_midcourse_burst_remaining = 0;
 		_lost_streak = 0;
 		_auto_lock_streak = 0;
 		_auto_lock_last_sample_time = 0;
@@ -1034,6 +1046,11 @@ void DytGuidance::enter_state(TaskState new_state, uint8_t lost_reason)
 		_last_home_command_time = 0;
 		_last_retrigger_time = 0;
 		_last_hint_lock_time = 0;
+		_next_midcourse_point_time = 0;
+		_last_midcourse_point_time = 0;
+		_midcourse_burst_remaining = 0;
+		_midcourse_yaw_deg = NAN;
+		_midcourse_pitch_deg = NAN;
 		_auto_lock_streak = 0;
 		_auto_lock_last_sample_time = 0;
 		_candidate_lock_active = false;
@@ -1058,6 +1075,8 @@ void DytGuidance::enter_state(TaskState new_state, uint8_t lost_reason)
 		_last_home_command_time = 0;
 		_next_scan_time = 0;
 		_next_midcourse_point_time = 0;
+		_last_midcourse_point_time = 0;
+		_midcourse_burst_remaining = 0;
 		_midcourse_yaw_deg = NAN;
 		_midcourse_pitch_deg = NAN;
 		_auto_lock_streak = 0;
@@ -1067,6 +1086,9 @@ void DytGuidance::enter_state(TaskState new_state, uint8_t lost_reason)
 		_candidate_ignore_until = 0;
 		_candidate_ignored_sample_time = 0;
 	} else if (new_state == TaskState::Abort) {
+		_next_midcourse_point_time = 0;
+		_last_midcourse_point_time = 0;
+		_midcourse_burst_remaining = 0;
 		_auto_lock_streak = 0;
 		_auto_lock_last_sample_time = 0;
 		_candidate_lock_active = false;
@@ -1304,8 +1326,6 @@ bool DytGuidance::compute_midcourse_gimbal_angle(float &yaw_deg, float &pitch_de
 
 bool DytGuidance::update_midcourse_gimbal_pointing(hrt_abstime now, bool force)
 {
-	constexpr hrt_abstime MIDCOURSE_POINT_INTERVAL{100_ms};
-
 	if (target_locked()) {
 		return false;
 	}
@@ -1319,15 +1339,47 @@ bool DytGuidance::update_midcourse_gimbal_pointing(hrt_abstime now, bool force)
 
 	yaw_deg = math::constrain(yaw_deg, FRAME_YAW_MIN_DEG, FRAME_YAW_MAX_DEG);
 	pitch_deg = math::constrain(pitch_deg, FRAME_PITCH_MIN_DEG, FRAME_PITCH_MAX_DEG);
+	const bool have_previous_angle = PX4_ISFINITE(_midcourse_yaw_deg) && PX4_ISFINITE(_midcourse_pitch_deg);
+	const float angle_delta_deg = have_previous_angle ?
+				      math::max(fabsf(yaw_deg - _midcourse_yaw_deg), fabsf(pitch_deg - _midcourse_pitch_deg)) :
+				      MIDCOURSE_RESEND_ANGLE_DELTA_DEG;
+	const bool angle_changed = !have_previous_angle || angle_delta_deg >= MIDCOURSE_RESEND_ANGLE_DELTA_DEG;
+
 	_midcourse_yaw_deg = yaw_deg;
 	_midcourse_pitch_deg = pitch_deg;
+
+	if (force || angle_changed) {
+		_midcourse_burst_remaining = math::max(_midcourse_burst_remaining, MIDCOURSE_BURST_COUNT);
+
+		if (_last_midcourse_point_time == 0 || (now - _last_midcourse_point_time) >= MIDCOURSE_BURST_INTERVAL) {
+			_next_midcourse_point_time = now;
+
+		} else {
+			const hrt_abstime earliest_retry = _last_midcourse_point_time + MIDCOURSE_BURST_INTERVAL;
+
+			if (_next_midcourse_point_time == 0 || _next_midcourse_point_time > earliest_retry) {
+				_next_midcourse_point_time = earliest_retry;
+			}
+		}
+	}
 
 	if (!force && _next_midcourse_point_time != 0 && now < _next_midcourse_point_time) {
 		return true;
 	}
 
+	if (!force && _last_midcourse_point_time != 0 && (now - _last_midcourse_point_time) < MIDCOURSE_BURST_INTERVAL) {
+		return true;
+	}
+
 	send_scan_angle(yaw_deg, pitch_deg);
-	_next_midcourse_point_time = now + MIDCOURSE_POINT_INTERVAL;
+	_last_midcourse_point_time = now;
+
+	if (_midcourse_burst_remaining > 0) {
+		--_midcourse_burst_remaining;
+	}
+
+	_next_midcourse_point_time = now + (_midcourse_burst_remaining > 0 ? MIDCOURSE_BURST_INTERVAL :
+					    MIDCOURSE_HOLD_INTERVAL);
 	return true;
 }
 

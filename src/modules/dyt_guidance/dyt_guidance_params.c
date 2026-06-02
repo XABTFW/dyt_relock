@@ -50,6 +50,27 @@ PARAM_DEFINE_INT32(DYTG_INT_AUX, 2);
 PARAM_DEFINE_FLOAT(DYTG_STK_TK, 0.30f);
 
 /**
+ * Enable automatic guidance activation from detected target hints
+ *
+ * When enabled, the activation AUX/button/payload switch gates automatic
+ * tracking: switch on, then guidance arms its tracking workflow after a target
+ * lock candidate is visible for DYTG_AUTO_N consecutive frames.
+ *
+ * @boolean
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_INT32(DYTG_AUTO_EN, 0);
+
+/**
+ * Consecutive candidate frames for automatic guidance activation
+ *
+ * @min 1
+ * @max 30
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_INT32(DYTG_AUTO_N, 5);
+
+/**
  * Consecutive lock frames to enter tracking
  *
  * @min 1
@@ -373,6 +394,174 @@ PARAM_DEFINE_FLOAT(DYTG_MAXDZ, 1.0f);
  * @group DYT Guidance
  */
 PARAM_DEFINE_FLOAT(DYTG_ZSCALE, 0.25f);
+
+/**
+ * Enable vertical-priority XY scaling
+ *
+ * When enabled, horizontal tracking is reduced while the target is far above
+ * or below the vehicle LOS. This helps avoid flying past the target projection
+ * before vertical error has reduced.
+ *
+ * @boolean
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_INT32(DYTG_ZXY_EN, 0);
+
+/**
+ * Minimum XY scale during vertical-priority tracking
+ *
+ * Horizontal velocity and horizontal feedforward acceleration are never scaled
+ * below this fraction when vertical-priority XY scaling is enabled.
+ *
+ * @min 0.0
+ * @max 1.0
+ * @decimal 2
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_FLOAT(DYTG_ZXY_MIN, 0.25f);
+
+/**
+ * Vertical LOS value for maximum XY reduction
+ *
+ * When vertical-priority XY scaling is enabled, XY reduction reaches
+ * DYTG_ZXY_MIN once abs(los_ned[2]) reaches this value.
+ *
+ * @min 0.05
+ * @max 1.0
+ * @decimal 2
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_FLOAT(DYTG_ZXY_FULL, 0.70f);
+
+/**
+ * Enable XY overshoot guard
+ *
+ * When enabled, horizontal tracking is reduced if the vehicle is moving away
+ * from the target horizontal LOS while the target is still far above or below.
+ *
+ * @boolean
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_INT32(DYTG_XYOVR_EN, 0);
+
+/**
+ * Vertical LOS threshold for XY overshoot guard
+ *
+ * XY overshoot protection starts once abs(los_ned[2]) is above this value.
+ *
+ * @min 0.0
+ * @max 1.0
+ * @decimal 2
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_FLOAT(DYTG_XYOVR_Z, 0.75f);
+
+/**
+ * Reverse horizontal closing speed for full XY overshoot guard
+ *
+ * XY overshoot protection reaches DYTG_XYOVR_MIN once the vehicle is moving
+ * away from the target horizontal LOS by this speed.
+ *
+ * @unit m/s
+ * @min 0.1
+ * @max 20.0
+ * @decimal 1
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_FLOAT(DYTG_XYOVR_V, 2.0f);
+
+/**
+ * Minimum XY scale during XY overshoot guard
+ *
+ * Horizontal velocity and horizontal feedforward acceleration are never scaled
+ * below this fraction when XY overshoot protection is active.
+ *
+ * @min 0.0
+ * @max 1.0
+ * @decimal 2
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_FLOAT(DYTG_XYOVR_MIN, 0.15f);
+
+/**
+ * Enable XY LOS turn-rate guard
+ *
+ * When enabled, horizontal tracking is reduced before overshoot if horizontal
+ * LOS direction is rotating quickly while the target is still far above or
+ * below the vehicle.
+ *
+ * @boolean
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_INT32(DYTG_XYROT_EN, 0);
+
+/**
+ * Horizontal LOS turn rate for full XY guard
+ *
+ * The turn-rate guard reaches DYTG_XYROT_MIN when the horizontal LOS direction
+ * rotates at this rate.
+ *
+ * @unit rad/s
+ * @min 0.1
+ * @max 5.0
+ * @decimal 2
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_FLOAT(DYTG_XYROT_W, 1.0f);
+
+/**
+ * Minimum XY scale during LOS turn-rate guard
+ *
+ * Horizontal velocity and horizontal feedforward acceleration are never scaled
+ * below this fraction when the turn-rate guard is active.
+ *
+ * @min 0.0
+ * @max 1.0
+ * @decimal 2
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_FLOAT(DYTG_XYROT_MIN, 0.20f);
+
+/**
+ * Horizontal LOS deadband near vertical target
+ *
+ * @min 0.0
+ * @max 0.8
+ * @decimal 2
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_FLOAT(DYTG_XYDB, 0.20f);
+
+/**
+ * Horizontal LOS value for full XY tracking
+ *
+ * @min 0.05
+ * @max 1.0
+ * @decimal 2
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_FLOAT(DYTG_XYFULL, 0.60f);
+
+/**
+ * Minimum horizontal LOS for yaw tracking
+ *
+ * @min 0.01
+ * @max 1.0
+ * @decimal 2
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_FLOAT(DYTG_YAWLOS, 0.20f);
+
+/**
+ * Horizontal velocity setpoint slew rate
+ *
+ * @unit m/s^2
+ * @min 0.1
+ * @max 20.0
+ * @decimal 1
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_FLOAT(DYTG_XYSLEW, 3.0f);
 
 /**
  * Front cone half-angle for intercept

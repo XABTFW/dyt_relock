@@ -148,6 +148,7 @@ private:
 	int16_t angle_deg_to_cdeg(float angle_deg) const;
 	void retry_autolock(hrt_abstime now);
 	bool update_hint_autolock(hrt_abstime now);
+	void update_auto_activation(hrt_abstime now);
 	bool handle_lock_candidate_or_timeout(hrt_abstime now);
 	void reset_search_scan(hrt_abstime now);
 	void update_search_scan(hrt_abstime now);
@@ -168,6 +169,7 @@ private:
 	int _lock_streak{0};
 	int _relock_streak{0};
 	int _lost_streak{0};
+	int _auto_lock_streak{0};
 	ScanRegion _scan_region{ScanRegion::Center};
 	int _scan_center_passes{0};
 	int _scan_row{0};
@@ -185,6 +187,7 @@ private:
 	hrt_abstime _candidate_lock_start_time{0};
 	hrt_abstime _candidate_ignore_until{0};
 	hrt_abstime _candidate_ignored_sample_time{0};
+	hrt_abstime _auto_lock_last_sample_time{0};
 	bool _candidate_lock_active{false};
 	uint32_t _command_pub_count{0};
 	float _scan_yaw_deg{0.f};
@@ -216,6 +219,7 @@ private:
 	float _yaw_sp{NAN};
 	float _yaw_rate_sp{NAN};
 	hrt_abstime _prev_los_update{0};
+	hrt_abstime _last_track_setpoint_time{0};
 	bool _los_filter_initialized{false};
 
 	uORB::Subscription _dyt_target_sub{ORB_ID(dyt_target)};
@@ -238,6 +242,8 @@ private:
 		(ParamInt<px4::params::DYTG_ACT_BTN>) _param_act_btn,
 		(ParamInt<px4::params::DYTG_INT_AUX>) _param_int_aux,
 		(ParamFloat<px4::params::DYTG_STK_TK>) _param_stick_takeover,
+		(ParamInt<px4::params::DYTG_AUTO_EN>) _param_auto_enable,
+		(ParamInt<px4::params::DYTG_AUTO_N>) _param_auto_frames,
 		(ParamInt<px4::params::DYTG_LOCK_N>) _param_lock_frames,
 		(ParamInt<px4::params::DYTG_RELOCKN>) _param_relock_frames,
 		(ParamInt<px4::params::DYTG_WAITMS>) _param_wait_ms,
@@ -269,6 +275,20 @@ private:
 		(ParamFloat<px4::params::DYTG_YAWLIM>) _param_yaw_limit_deg,
 		(ParamFloat<px4::params::DYTG_MAXDZ>) _param_max_dz,
 		(ParamFloat<px4::params::DYTG_ZSCALE>) _param_z_scale,
+		(ParamInt<px4::params::DYTG_ZXY_EN>) _param_zxy_enable,
+		(ParamFloat<px4::params::DYTG_ZXY_MIN>) _param_zxy_min_scale,
+		(ParamFloat<px4::params::DYTG_ZXY_FULL>) _param_zxy_full_los,
+		(ParamInt<px4::params::DYTG_XYOVR_EN>) _param_xy_overshoot_enable,
+		(ParamFloat<px4::params::DYTG_XYOVR_Z>) _param_xy_overshoot_z,
+		(ParamFloat<px4::params::DYTG_XYOVR_V>) _param_xy_overshoot_speed,
+		(ParamFloat<px4::params::DYTG_XYOVR_MIN>) _param_xy_overshoot_min_scale,
+		(ParamInt<px4::params::DYTG_XYROT_EN>) _param_xy_turn_rate_enable,
+		(ParamFloat<px4::params::DYTG_XYROT_W>) _param_xy_turn_rate_full,
+		(ParamFloat<px4::params::DYTG_XYROT_MIN>) _param_xy_turn_rate_min_scale,
+		(ParamFloat<px4::params::DYTG_XYDB>) _param_xy_deadband,
+		(ParamFloat<px4::params::DYTG_XYFULL>) _param_xy_full,
+		(ParamFloat<px4::params::DYTG_YAWLOS>) _param_yaw_los_min,
+		(ParamFloat<px4::params::DYTG_XYSLEW>) _param_xy_slew_rate,
 		(ParamFloat<px4::params::DYTG_FCONE>) _param_front_cone_deg,
 		(ParamFloat<px4::params::DYTG_LPF_A>) _param_lpf_alpha,
 		(ParamFloat<px4::params::DYTG_PREDMAX>) _param_pred_max,
@@ -320,6 +340,8 @@ void DytGuidance::show_status()
 	PX4_INFO("activation button: %ld buttons=0x%04x",
 		 static_cast<long>(_param_act_btn.get()), static_cast<unsigned>(_manual_control.buttons));
 	PX4_INFO("payload switch: %u", static_cast<unsigned>(_manual_switches.payload_power_switch));
+	PX4_INFO("auto activation: en=%ld streak=%d/%ld",
+		 static_cast<long>(_param_auto_enable.get()), _auto_lock_streak, static_cast<long>(_param_auto_frames.get()));
 	PX4_INFO("manual valid: %u roll=%.2f pitch=%.2f yaw=%.2f sticks=%u",
 		 static_cast<unsigned>(_manual_control.valid),
 		 static_cast<double>(_manual_control.roll),
@@ -500,6 +522,7 @@ void DytGuidance::clear_observations()
 	_los_ned.zero();
 	_los_filter_initialized = false;
 	_prev_los_update = 0;
+	_last_track_setpoint_time = 0;
 }
 
 bool DytGuidance::update_los_estimate(hrt_abstime now)
@@ -688,6 +711,8 @@ DytGuidance::TrackProfile DytGuidance::intercept_profile() const
 
 void DytGuidance::publish_hold_setpoint()
 {
+	_last_track_setpoint_time = 0;
+
 	trajectory_setpoint_s setpoint{};
 	setpoint.timestamp = hrt_absolute_time();
 	_hold_position.copyTo(setpoint.position);
@@ -710,7 +735,9 @@ void DytGuidance::publish_hold_setpoint()
 
 void DytGuidance::publish_track_setpoint(const TrackProfile &profile)
 {
-	if (!update_los_estimate(hrt_absolute_time())) {
+	const hrt_abstime now = hrt_absolute_time();
+
+	if (!update_los_estimate(now)) {
 		publish_hold_setpoint();
 		return;
 	}
@@ -723,19 +750,91 @@ void DytGuidance::publish_track_setpoint(const TrackProfile &profile)
 
 	Vector2f horizontal_los(_los_ned(0), _los_ned(1));
 	const float los_xy_norm = horizontal_los.norm();
-	constexpr float xy_deadband{0.15f};
-	constexpr float xy_full{0.60f};
+	const float xy_deadband = math::constrain(_param_xy_deadband.get(), 0.f, 0.8f);
+	const float xy_full = math::constrain(_param_xy_full.get(), xy_deadband + 0.05f, 1.f);
 	float xy_scale{0.f};
 
 	if (los_xy_norm > xy_deadband) {
 		xy_scale = math::constrain((los_xy_norm - xy_deadband) / (xy_full - xy_deadband), 0.f, 1.f);
+		xy_scale = xy_scale * xy_scale * (3.f - 2.f * xy_scale);
 	}
 
-	Vector2f vel_xy(0.f, 0.f);
+	float zxy_scale{1.f};
+
+	if (_param_zxy_enable.get() > 0) {
+		const float zxy_min = math::constrain(_param_zxy_min_scale.get(), 0.f, 1.f);
+		const float zxy_full = math::constrain(_param_zxy_full_los.get(), 0.05f, 1.f);
+		float z_ratio = math::constrain(fabsf(_los_ned(2)) / zxy_full, 0.f, 1.f);
+		z_ratio = z_ratio * z_ratio * (3.f - 2.f * z_ratio);
+		zxy_scale = 1.f - (1.f - zxy_min) * z_ratio;
+	}
+
+	Vector2f vel_xy_raw(0.f, 0.f);
+	Vector2f horizontal_dir(0.f, 0.f);
 
 	if (los_xy_norm > 1e-3f) {
-		const Vector2f horizontal_dir = horizontal_los / los_xy_norm;
-		vel_xy = horizontal_dir * profile.v_cmd * xy_scale;
+		horizontal_dir = horizontal_los / los_xy_norm;
+	}
+
+	float xy_overshoot_scale{1.f};
+	float xy_turn_rate_scale{1.f};
+
+	if (_param_xy_overshoot_enable.get() > 0 && los_xy_norm > 1e-3f) {
+		const Vector2f vehicle_velocity_xy(vehicle_velocity(0), vehicle_velocity(1));
+		const float horizontal_closing_speed = vehicle_velocity_xy.dot(horizontal_dir);
+
+		if (horizontal_closing_speed < 0.f) {
+			const float overshoot_min = math::constrain(_param_xy_overshoot_min_scale.get(), 0.f, 1.f);
+			const float overshoot_z = math::constrain(_param_xy_overshoot_z.get(), 0.f, 0.95f);
+			const float overshoot_speed = math::max(_param_xy_overshoot_speed.get(), 0.1f);
+			float z_ratio = math::constrain((fabsf(_los_ned(2)) - overshoot_z) / (1.f - overshoot_z), 0.f, 1.f);
+			float reverse_ratio = math::constrain(-horizontal_closing_speed / overshoot_speed, 0.f, 1.f);
+			z_ratio = z_ratio * z_ratio * (3.f - 2.f * z_ratio);
+			reverse_ratio = reverse_ratio * reverse_ratio * (3.f - 2.f * reverse_ratio);
+			const float guard_ratio = z_ratio * reverse_ratio;
+			xy_overshoot_scale = 1.f - (1.f - overshoot_min) * guard_ratio;
+		}
+	}
+
+	if (_param_xy_turn_rate_enable.get() > 0 && los_xy_norm > 1e-3f) {
+		const float turn_rate_min = math::constrain(_param_xy_turn_rate_min_scale.get(), 0.f, 1.f);
+		const float turn_rate_full = math::max(_param_xy_turn_rate_full.get(), 0.1f);
+		const float overshoot_z = math::constrain(_param_xy_overshoot_z.get(), 0.f, 0.95f);
+		const float los_xy_sq = math::max(los_xy_norm * los_xy_norm, 0.05f);
+		float z_ratio = math::constrain((fabsf(_los_ned(2)) - overshoot_z) / (1.f - overshoot_z), 0.f, 1.f);
+		float turn_ratio = math::constrain(fabsf(_omega_los(2)) / los_xy_sq / turn_rate_full, 0.f, 1.f);
+		z_ratio = z_ratio * z_ratio * (3.f - 2.f * z_ratio);
+		turn_ratio = turn_ratio * turn_ratio * (3.f - 2.f * turn_ratio);
+		const float guard_ratio = z_ratio * turn_ratio;
+		xy_turn_rate_scale = 1.f - (1.f - turn_rate_min) * guard_ratio;
+	}
+
+	const float xy_guard_scale = xy_overshoot_scale * xy_turn_rate_scale;
+
+	if (los_xy_norm > 1e-3f) {
+		vel_xy_raw = horizontal_dir * profile.v_cmd * xy_scale * zxy_scale * xy_guard_scale;
+	}
+
+	const float max_vel = math::max(_param_max_vel.get(), 0.1f);
+
+	if (vel_xy_raw.norm() > max_vel) {
+		vel_xy_raw = vel_xy_raw.normalized() * max_vel;
+	}
+
+	Vector2f vel_xy(vel_xy_raw);
+	Vector2f previous_vel_xy(_velocity_sp(0), _velocity_sp(1));
+
+	if (!PX4_ISFINITE(previous_vel_xy(0)) || !PX4_ISFINITE(previous_vel_xy(1))) {
+		previous_vel_xy.zero();
+	}
+
+	const float dt_sp = _last_track_setpoint_time > 0 ? math::constrain((now - _last_track_setpoint_time) * 1e-6f,
+			    0.005f, 0.1f) : 0.02f;
+	const float max_delta_xy = math::max(_param_xy_slew_rate.get(), 0.1f) * dt_sp;
+	const Vector2f delta_vel_xy = vel_xy_raw - previous_vel_xy;
+
+	if (delta_vel_xy.norm() > max_delta_xy) {
+		vel_xy = previous_vel_xy + delta_vel_xy.normalized() * max_delta_xy;
 	}
 
 	_velocity_sp(0) = vel_xy(0);
@@ -743,14 +842,7 @@ void DytGuidance::publish_track_setpoint(const TrackProfile &profile)
 	const float z_scale = math::constrain(_param_z_scale.get(), 0.f, 1.f);
 	const float max_dz = math::max(_param_max_dz.get(), 0.1f);
 	_velocity_sp(2) = math::constrain(_los_ned(2) * profile.v_cmd * z_scale, -max_dz, max_dz);
-
-	vel_xy = Vector2f(_velocity_sp(0), _velocity_sp(1));
-
-	if (vel_xy.norm() > _param_max_vel.get()) {
-		vel_xy = vel_xy.normalized() * _param_max_vel.get();
-		_velocity_sp(0) = vel_xy(0);
-		_velocity_sp(1) = vel_xy(1);
-	}
+	_last_track_setpoint_time = now;
 
 	Vector3f horizontal_vehicle_velocity(vehicle_velocity(0), vehicle_velocity(1), 0.f);
 	Vector3f horizontal_velocity_sp(_velocity_sp(0), _velocity_sp(1), 0.f);
@@ -766,6 +858,14 @@ void DytGuidance::publish_track_setpoint(const TrackProfile &profile)
 	pn_acc(1) *= xy_scale;
 	los_acc(0) *= xy_scale;
 	los_acc(1) *= xy_scale;
+	pn_acc(0) *= zxy_scale;
+	pn_acc(1) *= zxy_scale;
+	los_acc(0) *= zxy_scale;
+	los_acc(1) *= zxy_scale;
+	pn_acc(0) *= xy_guard_scale;
+	pn_acc(1) *= xy_guard_scale;
+	los_acc(0) *= xy_guard_scale;
+	los_acc(1) *= xy_guard_scale;
 
 	_acceleration_sp = pn_acc + los_acc + damp_acc;
 
@@ -779,7 +879,7 @@ void DytGuidance::publish_track_setpoint(const TrackProfile &profile)
 
 	_acceleration_sp(2) = 0.f;
 
-	constexpr float yaw_los_min{0.20f};
+	const float yaw_los_min = math::constrain(_param_yaw_los_min.get(), 0.01f, 1.f);
 	const float current_yaw = Eulerf(Quatf(_vehicle_attitude.q)).psi();
 
 	if (los_xy_norm <= yaw_los_min) {
@@ -796,7 +896,7 @@ void DytGuidance::publish_track_setpoint(const TrackProfile &profile)
 	}
 
 	trajectory_setpoint_s setpoint{};
-	setpoint.timestamp = hrt_absolute_time();
+	setpoint.timestamp = now;
 	setpoint.position[0] = NAN;
 	setpoint.position[1] = NAN;
 	setpoint.position[2] = NAN;
@@ -887,10 +987,14 @@ void DytGuidance::enter_state(TaskState new_state, uint8_t lost_reason)
 		_lock_streak = 0;
 		_relock_streak = 0;
 		_last_hint_lock_time = 0;
+		_auto_lock_streak = 0;
+		_auto_lock_last_sample_time = 0;
 	} else if (new_state == TaskState::TrackFollow || new_state == TaskState::TrackIntercept) {
 		_next_scan_time = 0;
 		_search_pause_until = 0;
 		_lost_streak = 0;
+		_auto_lock_streak = 0;
+		_auto_lock_last_sample_time = 0;
 		_candidate_lock_active = false;
 		_candidate_lock_start_time = 0;
 		_candidate_ignore_until = 0;
@@ -900,6 +1004,8 @@ void DytGuidance::enter_state(TaskState new_state, uint8_t lost_reason)
 		_last_home_command_time = 0;
 		_last_retrigger_time = 0;
 		_last_hint_lock_time = 0;
+		_auto_lock_streak = 0;
+		_auto_lock_last_sample_time = 0;
 		_candidate_lock_active = false;
 		_candidate_lock_start_time = 0;
 		_candidate_ignore_until = 0;
@@ -920,11 +1026,15 @@ void DytGuidance::enter_state(TaskState new_state, uint8_t lost_reason)
 		_yaw_rate_sp = NAN;
 		_last_home_command_time = 0;
 		_next_scan_time = 0;
+		_auto_lock_streak = 0;
+		_auto_lock_last_sample_time = 0;
 		_candidate_lock_active = false;
 		_candidate_lock_start_time = 0;
 		_candidate_ignore_until = 0;
 		_candidate_ignored_sample_time = 0;
 	} else if (new_state == TaskState::Abort) {
+		_auto_lock_streak = 0;
+		_auto_lock_last_sample_time = 0;
 		_candidate_lock_active = false;
 		_candidate_lock_start_time = 0;
 		_candidate_ignore_until = 0;
@@ -1106,6 +1216,48 @@ bool DytGuidance::update_hint_autolock(hrt_abstime now)
 
 	// 虽然没到重发时间，但目标候选仍然存在，所以外层必须停止搜索
 	return true;
+}
+
+void DytGuidance::update_auto_activation(hrt_abstime now)
+{
+	if (_param_auto_enable.get() <= 0 || _state != TaskState::Idle || !preconditions_ok()) {
+		_auto_lock_streak = 0;
+		_auto_lock_last_sample_time = 0;
+		return;
+	}
+
+	if (!target_lock_candidate()) {
+		_auto_lock_streak = 0;
+		_auto_lock_last_sample_time = 0;
+		return;
+	}
+
+	if (_last_target.timestamp_sample == _auto_lock_last_sample_time) {
+		return;
+	}
+
+	_auto_lock_last_sample_time = _last_target.timestamp_sample;
+	++_auto_lock_streak;
+
+	const int32_t required_frames = math::constrain(_param_auto_frames.get(), int32_t{1}, int32_t{30});
+
+	if (_auto_lock_streak < required_frames) {
+		return;
+	}
+
+	if (!target_locked()) {
+		send_dyt_command(dyt_command_s::CMD_AUTO_LOCK, -100);
+	}
+
+	activate_guidance(now);
+
+	if (_state == TaskState::SearchWaitLock) {
+		_last_hint_lock_time = now;
+		_last_retrigger_time = now;
+	}
+
+	_auto_lock_streak = 0;
+	_auto_lock_last_sample_time = 0;
 }
 
 bool DytGuidance::handle_lock_candidate_or_timeout(hrt_abstime now)
@@ -1331,21 +1483,37 @@ void DytGuidance::Run()
 
 	const hrt_abstime now = hrt_absolute_time();
 	const bool activation_request = activation_requested();
+	const bool auto_activation_enabled = _param_auto_enable.get() > 0;
 	const bool intercept_request = aux_switch_active(_param_int_aux.get());
 
-	if (activation_request && !_prev_activation_request) {
-		activate_guidance(now);
-	}
+	if (auto_activation_enabled) {
+		if (activation_request) {
+			update_auto_activation(now);
 
-	if (!activation_request && _prev_activation_request) {
-		deactivate_guidance(dyt_guidance_status_s::LOST_REASON_PRECONDITION);
+		} else {
+			_auto_lock_streak = 0;
+			_auto_lock_last_sample_time = 0;
+
+			if (_prev_activation_request) {
+				deactivate_guidance(dyt_guidance_status_s::LOST_REASON_PRECONDITION);
+			}
+		}
+
+	} else {
+		if (activation_request && !_prev_activation_request) {
+			activate_guidance(now);
+		}
+
+		if (!activation_request && _prev_activation_request) {
+			deactivate_guidance(dyt_guidance_status_s::LOST_REASON_PRECONDITION);
+		}
 	}
 
 	_prev_activation_request = activation_request;
 	_requested_submode = intercept_request ? dyt_guidance_status_s::SUBMODE_INTERCEPT :
 			     dyt_guidance_status_s::SUBMODE_FOLLOW;
 
-	if (activation_request && (_state == TaskState::Idle || _state == TaskState::Abort)) {
+	if (!auto_activation_enabled && activation_request && (_state == TaskState::Idle || _state == TaskState::Abort)) {
 		update_payload_only_reacquire(now);
 	}
 

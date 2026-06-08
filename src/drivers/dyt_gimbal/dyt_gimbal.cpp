@@ -51,9 +51,6 @@ private:
 	static constexpr uint8_t COMMAND_SYNC_1{0xFB};
 	static constexpr size_t FIXED_FRAME_LEN{64};
 	static constexpr size_t MAX_FRAME_LEN{64};
-	static constexpr uint8_t ALT_FRAME_SYNC_1{0x84};
-	static constexpr uint8_t ALT_FRAME_SYNC_2{0xBA};
-	static constexpr size_t ALT_FRAME_LEN{28};
 	static constexpr size_t COMMAND_LEN{44};
 	static constexpr hrt_abstime CONTROL_FRAME_INTERVAL{40_ms};
 	static constexpr unsigned CENTER_SEQUENCE_DELAY_US{80000};
@@ -69,16 +66,12 @@ private:
 	void read_serial();
 	void process_byte(uint8_t byte);
 	void process_primary_byte(uint8_t byte);
-	void process_alt_byte(uint8_t byte);
 	void reset_primary_frame_parser();
 	bool validate_frame(const uint8_t *frame, size_t frame_len) const;
 	void handle_primary_frame(const uint8_t *frame, size_t frame_len, hrt_abstime now);
 	void handle_frame(const uint8_t *frame, hrt_abstime now);
-	void handle_target_geo_frame(const uint8_t *frame, hrt_abstime now);
 	void handle_status_reply_frame(const uint8_t *frame, size_t frame_len, hrt_abstime now);
-	void handle_alt_frame(const uint8_t *frame, hrt_abstime now);
 	void maybe_log_target(const dyt_target_s &target, const uint8_t *frame);
-	void maybe_log_target_geo(const uint8_t *frame, hrt_abstime now);
 	void log_status_reply(const dyt_status_reply_s &reply, const uint8_t *frame, size_t frame_len);
 	void maybe_log_raw_frame(const char *label, const uint8_t *frame, size_t frame_len);
 	void publish_link_state(hrt_abstime now, uint8_t tracking_state);
@@ -106,15 +99,9 @@ private:
 	bool _awaiting_sync_2{false};
 	size_t _expected_frame_len{0};
 	uint8_t _frame_type{0};
-	uint8_t _alt_frame[ALT_FRAME_LEN]{};
-	size_t _alt_frame_index{0};
-	bool _alt_awaiting_sync_2{false};
 
 	hrt_abstime _last_rx_time{0};
-	hrt_abstime _last_target_geo_time{0};
-	hrt_abstime _last_target_geo_log_time{0};
 	hrt_abstime _last_status_reply_time{0};
-	hrt_abstime _last_alt_rx_time{0};
 	hrt_abstime _last_open_attempt{0};
 	hrt_abstime _last_state_publish{0};
 	hrt_abstime _last_command_time{0};
@@ -125,22 +112,16 @@ private:
 	hrt_abstime _startup_home_next_time{0};
 
 	uint32_t _frame_counter{0};
-	uint32_t _target_geo_frame_counter{0};
 	uint32_t _status_reply_counter{0};
-	uint32_t _alt_frame_counter{0};
 	uint16_t _parse_error_count{0};
 	uint16_t _read_error_count{0};
 	uint16_t _write_error_count{0};
 	uint64_t _rx_byte_count{0};
 	uint32_t _sync1_count{0};
 	uint32_t _sync2_count{0};
-	uint32_t _target_geo_sync2_count{0};
 	uint32_t _status_reply_sync2_count{0};
 	uint32_t _other_frame_type_count{0};
 	uint8_t _last_sync2_byte{0};
-	uint32_t _alt_sync1_count{0};
-	uint32_t _alt_sync2_count{0};
-	uint8_t _alt_last_sync2_byte{0};
 	uint32_t _command_tx_count{0};
 	uint32_t _startup_home_count{0};
 	uint8_t _last_command_control{0};
@@ -210,12 +191,7 @@ void DytGimbal::show_status()
 	PX4_INFO("json replies: %lu", static_cast<unsigned long>(_status_reply_sync2_count));
 	PX4_INFO("other after 0xFC: %lu", static_cast<unsigned long>(_other_frame_type_count));
 	PX4_INFO("last byte after 0xFC: 0x%02x", _last_sync2_byte);
-	PX4_INFO("sync 0x84: %lu", static_cast<unsigned long>(_alt_sync1_count));
-	PX4_INFO("sync 0xBA: %lu", static_cast<unsigned long>(_alt_sync2_count));
-	PX4_INFO("alt frames: %lu", static_cast<unsigned long>(_alt_frame_counter));
-	PX4_INFO("last byte after 0x84: 0x%02x", _alt_last_sync2_byte);
 	PX4_INFO("frames: %lu", static_cast<unsigned long>(_frame_counter));
-	PX4_INFO("target geo frames: %lu", static_cast<unsigned long>(_target_geo_frame_counter));
 	PX4_INFO("status replies: %lu", static_cast<unsigned long>(_status_reply_counter));
 	PX4_INFO("parse errors: %u", _parse_error_count);
 	PX4_INFO("read errors: %u", _read_error_count);
@@ -245,12 +221,8 @@ void DytGimbal::show_status()
 	PX4_INFO("raw frame log: %ld", static_cast<long>(_param_dyt_rawlog.get()));
 	PX4_INFO("last rx: %.3f s", static_cast<double>(_last_rx_time > 0 ?
 			(hrt_absolute_time() - _last_rx_time) * 1e-6 : -1.0));
-	PX4_INFO("last geo rx: %.3f s", static_cast<double>(_last_target_geo_time > 0 ?
-			(hrt_absolute_time() - _last_target_geo_time) * 1e-6 : -1.0));
 	PX4_INFO("last reply rx: %.3f s", static_cast<double>(_last_status_reply_time > 0 ?
 			(hrt_absolute_time() - _last_status_reply_time) * 1e-6 : -1.0));
-	PX4_INFO("last alt rx: %.3f s", static_cast<double>(_last_alt_rx_time > 0 ?
-			(hrt_absolute_time() - _last_alt_rx_time) * 1e-6 : -1.0));
 }
 
 void DytGimbal::Run()
@@ -441,7 +413,6 @@ void DytGimbal::read_serial()
 void DytGimbal::process_byte(uint8_t byte)
 {
 	process_primary_byte(byte);
-	process_alt_byte(byte);
 }
 
 void DytGimbal::reset_primary_frame_parser()
@@ -511,48 +482,6 @@ void DytGimbal::process_primary_byte(uint8_t byte)
 		}
 
 		reset_primary_frame_parser();
-	}
-}
-
-void DytGimbal::process_alt_byte(uint8_t byte)
-{
-	if (_alt_frame_index == 0) {
-		if (byte == ALT_FRAME_SYNC_1) {
-			++_alt_sync1_count;
-			_alt_frame[_alt_frame_index++] = byte;
-			_alt_awaiting_sync_2 = true;
-		}
-
-		return;
-	}
-
-	if (_alt_awaiting_sync_2) {
-		_alt_last_sync2_byte = byte;
-
-		if (byte == ALT_FRAME_SYNC_2) {
-			++_alt_sync2_count;
-			_alt_frame[_alt_frame_index++] = byte;
-			_alt_awaiting_sync_2 = false;
-
-		} else if (byte == ALT_FRAME_SYNC_1) {
-			++_alt_sync1_count;
-			_alt_frame[0] = ALT_FRAME_SYNC_1;
-			_alt_frame_index = 1;
-
-		} else {
-			_alt_frame_index = 0;
-			_alt_awaiting_sync_2 = false;
-		}
-
-		return;
-	}
-
-	_alt_frame[_alt_frame_index++] = byte;
-
-	if (_alt_frame_index == ALT_FRAME_LEN) {
-		handle_alt_frame(_alt_frame, hrt_absolute_time());
-		_alt_frame_index = 0;
-		_alt_awaiting_sync_2 = false;
 	}
 }
 
@@ -676,13 +605,6 @@ void DytGimbal::handle_frame(const uint8_t *frame, hrt_abstime now)
 	_dyt_target_pub.publish(target);
 }
 
-void DytGimbal::handle_target_geo_frame(const uint8_t *frame, hrt_abstime now)
-{
-	++_target_geo_frame_counter;
-	_last_target_geo_time = now;
-	maybe_log_target_geo(frame, now);
-}
-
 void DytGimbal::handle_status_reply_frame(const uint8_t *frame, size_t frame_len, hrt_abstime now)
 {
 	dyt_status_reply_s reply{};
@@ -714,13 +636,6 @@ void DytGimbal::handle_status_reply_frame(const uint8_t *frame, size_t frame_len
 	_last_status_reply = reply;
 	_dyt_status_reply_pub.publish(reply);
 	log_status_reply(reply, frame, frame_len);
-}
-
-void DytGimbal::handle_alt_frame(const uint8_t *frame, hrt_abstime now)
-{
-	(void)frame;
-	_last_alt_rx_time = now;
-	++_alt_frame_counter;
 }
 
 void DytGimbal::maybe_log_target(const dyt_target_s &target, const uint8_t *frame)
@@ -758,53 +673,6 @@ void DytGimbal::maybe_log_target(const dyt_target_s &target, const uint8_t *fram
 		 static_cast<double>(target.frame_dt_s));
 
 	maybe_log_raw_frame("DYT raw 0xFC", frame, FIXED_FRAME_LEN);
-}
-
-void DytGimbal::maybe_log_target_geo(const uint8_t *frame, hrt_abstime now)
-{
-	const int32_t log_period_ms = _param_dyt_log_ms.get();
-
-	if (log_period_ms <= 0) {
-		return;
-	}
-
-	const hrt_abstime log_period_us = static_cast<hrt_abstime>(log_period_ms) * 1000ULL;
-
-	if ((_last_target_geo_log_time != 0) && ((now - _last_target_geo_log_time) < log_period_us)) {
-		return;
-	}
-
-	_last_target_geo_log_time = now;
-
-	const auto u32_at = [frame](size_t index) -> uint32_t {
-		return static_cast<uint32_t>(frame[index]) |
-		       (static_cast<uint32_t>(frame[index + 1]) << 8) |
-		       (static_cast<uint32_t>(frame[index + 2]) << 16) |
-		       (static_cast<uint32_t>(frame[index + 3]) << 24);
-	};
-
-	const auto s16_at = [frame](size_t index) -> int16_t {
-		return static_cast<int16_t>(static_cast<uint16_t>(frame[index]) |
-				       (static_cast<uint16_t>(frame[index + 1]) << 8));
-	};
-
-	const int32_t lat_raw = static_cast<int32_t>(u32_at(2));
-	const int32_t lon_raw = static_cast<int32_t>(u32_at(6));
-
-	PX4_INFO("DYT geo lat=%.7f lon=%.7f alt=%.1f m rel_alt=%.1f m time=%04u-%02u-%02u %02u:%02u:%02u.%02u",
-		 static_cast<double>(lat_raw) * 1e-7,
-		 static_cast<double>(lon_raw) * 1e-7,
-		 static_cast<double>(s16_at(10)) * 0.2,
-		 static_cast<double>(s16_at(12)) * 0.2,
-		 static_cast<unsigned>(frame[14]) + 2000U,
-		 static_cast<unsigned>(frame[15]),
-		 static_cast<unsigned>(frame[16]),
-		 static_cast<unsigned>(frame[17]),
-		 static_cast<unsigned>(frame[18]),
-		 static_cast<unsigned>(frame[19]),
-		 static_cast<unsigned>(frame[20]));
-
-	maybe_log_raw_frame("DYT raw 0x18", frame, FIXED_FRAME_LEN);
 }
 
 void DytGimbal::log_status_reply(const dyt_status_reply_s &reply, const uint8_t *frame, size_t frame_len)

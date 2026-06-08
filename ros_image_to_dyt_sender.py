@@ -52,7 +52,8 @@ def target_valid_for_state(tracking_state):
     return tracking_state == TRACKING_STATE_LOCKED
 
 
-def build_frame(los_x_rad, los_y_rad, bbox_width_px, bbox_height_px, tracking_state, frame_counter):
+def build_frame(los_x_rad, los_y_rad, bbox_width_px, bbox_height_px, tracking_state, frame_counter,
+                gimbal_roll_deg=0.0, gimbal_pitch_deg=0.0, gimbal_yaw_deg=0.0):
     frame = bytearray(FRAME_LEN)
     frame[0] = SYNC_1
     frame[1] = SYNC_2_TELEMETRY
@@ -63,9 +64,9 @@ def build_frame(los_x_rad, los_y_rad, bbox_width_px, bbox_height_px, tracking_st
     put_s16_le(frame, 6, angle_to_raw(math.degrees(los_x_rad), LOS_SCALE_DEG))
     put_s16_le(frame, 8, angle_to_raw(math.degrees(los_y_rad), LOS_SCALE_DEG))
 
-    put_s16_le(frame, 10, angle_to_raw(0.0, GIMBAL_SCALE_DEG))
-    put_s16_le(frame, 12, angle_to_raw(0.0, GIMBAL_SCALE_DEG))
-    put_s16_le(frame, 14, angle_to_raw(0.0, GIMBAL_SCALE_DEG))
+    put_s16_le(frame, 10, angle_to_raw(gimbal_roll_deg, GIMBAL_SCALE_DEG))
+    put_s16_le(frame, 12, angle_to_raw(gimbal_pitch_deg, GIMBAL_SCALE_DEG))
+    put_s16_le(frame, 14, angle_to_raw(gimbal_yaw_deg, GIMBAL_SCALE_DEG))
 
     if tracking_state == TRACKING_STATE_LOCKED:
         frame[16] = bbox_to_raw(bbox_width_px)
@@ -127,6 +128,8 @@ class RosImageToDytSender(Node):
         self.declare_parameter("enable_gz_gimbal_udp", False)
         self.declare_parameter("udp_target_host", "127.0.0.1")
         self.declare_parameter("udp_target_port", 15200)
+        self.declare_parameter("gimbal_feedback_bind", "127.0.0.1")
+        self.declare_parameter("gimbal_feedback_port", 15201)
 
         self._image_topic = self.get_parameter("image_topic").value
         self._port = self.get_parameter("port").value
@@ -146,6 +149,8 @@ class RosImageToDytSender(Node):
         self._enable_gz_gimbal_udp = bool(self.get_parameter("enable_gz_gimbal_udp").value)
         self._udp_target_host = self.get_parameter("udp_target_host").value
         self._udp_target_port = int(self.get_parameter("udp_target_port").value)
+        self._gimbal_feedback_bind = self.get_parameter("gimbal_feedback_bind").value
+        self._gimbal_feedback_port = int(self.get_parameter("gimbal_feedback_port").value)
 
         if self._rate <= 0.0:
             raise ValueError("rate must be greater than 0")
@@ -163,6 +168,20 @@ class RosImageToDytSender(Node):
         self._bbox_area = 0.0
         self._contour_count = 0
         self._max_area = 0.0
+        self._gimbal_roll_deg = 0.0
+        self._gimbal_pitch_deg = 0.0
+        self._gimbal_yaw_deg = 0.0
+        self._gimbal_feedback_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._gimbal_feedback_sock.setblocking(False)
+        try:
+            self._gimbal_feedback_sock.bind((self._gimbal_feedback_bind, self._gimbal_feedback_port))
+        except OSError as exc:
+            self.get_logger().warn(
+                f"failed to bind gimbal feedback UDP {self._gimbal_feedback_bind}:{self._gimbal_feedback_port}: {exc}; "
+                "gimbal angles will stay at 0"
+            )
+            self._gimbal_feedback_sock.close()
+            self._gimbal_feedback_sock = None
         self._gz_gimbal_udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) if self._enable_gz_gimbal_udp else None
         self._gz_gimbal_udp_addr = (self._udp_target_host, self._udp_target_port)
         self._gz_gimbal_udp_warned = False
@@ -188,6 +207,10 @@ class RosImageToDytSender(Node):
         if getattr(self, "_gz_gimbal_udp_sock", None) is not None:
             self._gz_gimbal_udp_sock.close()
             self._gz_gimbal_udp_sock = None
+
+        if getattr(self, "_gimbal_feedback_sock", None) is not None:
+            self._gimbal_feedback_sock.close()
+            self._gimbal_feedback_sock = None
 
         super().destroy_node()
 
@@ -324,7 +347,34 @@ class RosImageToDytSender(Node):
                 self.get_logger().warn(f"Gazebo gimbal UDP send failed: {exc}")
                 self._gz_gimbal_udp_warned = True
 
+    def _poll_gimbal_feedback(self):
+        if self._gimbal_feedback_sock is None:
+            return
+
+        latest = None
+
+        while True:
+            try:
+                data, _addr = self._gimbal_feedback_sock.recvfrom(2048)
+            except BlockingIOError:
+                break
+            except OSError:
+                break
+
+            latest = data
+
+        if latest is None:
+            return
+
+        try:
+            msg = json.loads(latest.decode("utf-8", errors="replace").strip())
+            self._gimbal_yaw_deg = float(msg.get("gimbal_yaw_deg", self._gimbal_yaw_deg))
+            self._gimbal_pitch_deg = float(msg.get("gimbal_pitch_deg", self._gimbal_pitch_deg))
+        except (ValueError, TypeError, json.JSONDecodeError):
+            return
+
     def _timer_callback(self):
+        self._poll_gimbal_feedback()
         self._frame_counter = (self._frame_counter + 1) & 0xFFFFFFFF
         image_timed_out = self._image_timed_out()
         tracking_state = TRACKING_STATE_SEARCH if image_timed_out else self._tracking_state
@@ -340,6 +390,9 @@ class RosImageToDytSender(Node):
             bbox_height_px,
             tracking_state,
             self._frame_counter,
+            gimbal_roll_deg=0.0,
+            gimbal_pitch_deg=self._gimbal_pitch_deg,
+            gimbal_yaw_deg=self._gimbal_yaw_deg,
         )
 
         send_time_s = time.monotonic()
@@ -354,6 +407,7 @@ class RosImageToDytSender(Node):
             f"bbox_width={bbox_width_px:.1f} bbox_height={bbox_height_px:.1f} "
             f"los_x_deg={math.degrees(los_x_rad):+.2f} "
             f"los_y_deg={math.degrees(los_y_rad):+.2f} "
+            f"gimbal_pitch_deg={self._gimbal_pitch_deg:+.2f} gimbal_yaw_deg={self._gimbal_yaw_deg:+.2f} "
             f"frame_counter={self._frame_counter} send_dt_s={send_dt_s:.4f}",
             flush=True,
         )

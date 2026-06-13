@@ -644,7 +644,7 @@ PARAM_DEFINE_FLOAT(DYTG_PREDMAX, 0.20f);
  * @value 1 Positive
  * @group DYT Guidance
  */
-PARAM_DEFINE_INT32(DYTG_LXSIGN, 1);
+PARAM_DEFINE_INT32(DYTG_LXSIGN, -1);
 
 /**
  * LOS Y sign
@@ -653,7 +653,7 @@ PARAM_DEFINE_INT32(DYTG_LXSIGN, 1);
  * @value 1 Positive
  * @group DYT Guidance
  */
-PARAM_DEFINE_INT32(DYTG_LYSIGN, -1);
+PARAM_DEFINE_INT32(DYTG_LYSIGN, 1);
 
 /**
  * Gimbal roll sign
@@ -671,7 +671,7 @@ PARAM_DEFINE_INT32(DYTG_RSIGN, 1);
  * @value 1 Positive
  * @group DYT Guidance
  */
-PARAM_DEFINE_INT32(DYTG_PSIGN, 1);
+PARAM_DEFINE_INT32(DYTG_PSIGN, -1);
 
 /**
  * Gimbal yaw sign
@@ -700,7 +700,7 @@ PARAM_DEFINE_FLOAT(DYTG_ROFF, 0.f);
  * @max 180
  * @group DYT Guidance
  */
-PARAM_DEFINE_FLOAT(DYTG_POFF, 0.f);
+PARAM_DEFINE_FLOAT(DYTG_POFF, -90.f);
 
 /**
  * Gimbal yaw offset

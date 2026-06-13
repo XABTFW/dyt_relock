@@ -1186,6 +1186,9 @@ void DytGuidance::activate_guidance(hrt_abstime now)
 	capture_hold_setpoint();
 	_requested_submode = dyt_guidance_status_s::SUBMODE_FOLLOW;
 	enter_state(TaskState::SearchWaitLock);
+	send_dyt_command(dyt_command_s::CMD_AUTO_LOCK, -100);
+	_last_hint_lock_time = now;
+	_last_retrigger_time = now;
 }
 
 void DytGuidance::deactivate_guidance(uint8_t lost_reason)
@@ -1512,10 +1515,6 @@ void DytGuidance::update_auto_activation(hrt_abstime now)
 
 	if (_auto_lock_streak < required_frames) {
 		return;
-	}
-
-	if (!target_locked()) {
-		send_dyt_command(dyt_command_s::CMD_AUTO_LOCK, -100);
 	}
 
 	activate_guidance(now);

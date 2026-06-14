@@ -534,7 +534,8 @@ bool DytGuidance::build_los_body(const dyt_target_s &target, Vector3f &los_body)
 	const float los_x = target.los_x_rad * static_cast<float>(_param_los_x_sign.get());
 	const float los_y = target.los_y_rad * static_cast<float>(_param_los_y_sign.get());
 
-	Vector3f los_gimbal(1.f, tanf(los_x), tanf(los_y));
+	// Flipped seeker frame: X_new = -X_old, Y_new = Y_old, Z_new = -Z_old.
+	Vector3f los_gimbal(-1.f, tanf(los_x), -tanf(los_y));
 
 	if (los_gimbal.norm_squared() < 1e-6f) {
 		return false;

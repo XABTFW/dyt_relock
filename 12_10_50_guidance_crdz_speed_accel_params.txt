@@ -1,0 +1,364 @@
+# 12_10_50.ulg 导引头 / cooperative_rendezvous / 速度加速度参数整理
+
+来源日志: `/home/btfw/1/12_10_50.ulg`
+
+- 导引头 `DYTG_*` 参数: 65 个
+- `cooperative_rendezvous` / `CRDZ_*` 参数: 6 个
+- 速度/加速度/角速度/空速/加速度计相关参数: 191 个
+- `system默认` 和 `setup默认` 是 ULog 内记录到的默认值；空白表示日志没有记录该项默认值。
+- `不同于日志默认值` 表示当前值和日志中某个默认值不同。
+
+## 速度加速度分类统计
+
+- 估计器速度/加速度: 39
+- 多旋翼位置/速度控制: 37
+- 多旋翼角速度控制: 34
+- 导引头模块: 26
+- 加速度计/IMU相关: 25
+- 固定翼/空速/空速传感器: 10
+- 其他速度/加速度相关: 7
+- Commander速度/风速门限: 5
+- 降落检测速度: 3
+- cooperative_rendezvous模块: 2
+- Follow Target速度: 1
+- Rover速度: 1
+- Weather-vane角速度: 1
+
+## 导引头模块 DYTG_* 全部参数
+
+|参数|当前值|system默认|setup默认|单位|说明|备注|
+|---|---|---|---|---|---|---|
+|DYTG_ACT_AUX|-1|1|1||Activation AUX channel|不同于日志默认值|
+|DYTG_ACT_BTN|2|-1|-1||Activation joystick button|不同于日志默认值|
+|DYTG_AUTO_EN|1|0|0||Enable automatic guidance activation from detected target hints|不同于日志默认值|
+|DYTG_AUTO_N|3|5|5||Consecutive candidate frames for automatic guidance activation|不同于日志默认值|
+|DYTG_COOP_EN|1|0|0||Cooperative rendezvous handoff enable|不同于日志默认值|
+|DYTG_CTRMS|400|||ms|Gimbal center settle time before relock retry||
+|DYTG_DLY_MS|120.0|||ms|Fixed pipeline delay||
+|DYTG_FCONE|40.0|35.0|35.0|deg|Front cone half-angle for intercept|不同于日志默认值|
+|DYTG_INTDLY|0.18000000715255737|||s|Maximum delay allowed for intercept||
+|DYTG_INT_AUX|2||||Intercept AUX channel||
+|DYTG_KA_FOL|0.5|1.2000000476837158|1.2000000476837158|m/s^2|Follow LOS acceleration gain|不同于日志默认值|
+|DYTG_KA_INT|2.0|||m/s^2|Intercept LOS acceleration gain||
+|DYTG_KV_FOL|0.800000011920929|1.0|1.0||Follow damping gain|不同于日志默认值|
+|DYTG_KV_INT|1.2000000476837158||||Intercept damping gain||
+|DYTG_LOCK_N|4||||Consecutive lock frames to enter tracking||
+|DYTG_LOSTMS|240000|||ms|Lost hold/search timeout||
+|DYTG_LPF_A|0.699999988079071|0.6499999761581421|0.6499999761581421||LOS low-pass alpha|不同于日志默认值|
+|DYTG_LXSIGN|1||||LOS X sign||
+|DYTG_LYSIGN|1||||LOS Y sign||
+|DYTG_MAXACC|8.0|4.0|4.0|m/s^2|Maximum acceleration feedforward|不同于日志默认值|
+|DYTG_MAXAGE|0.20000000298023224|0.25|0.25|s|Maximum target age|不同于日志默认值|
+|DYTG_MAXDZ|8.0|1.0|1.0|m/s|Maximum vertical speed magnitude|不同于日志默认值|
+|DYTG_MAXJIT|0.11999999731779099|||s|Maximum allowed frame gap||
+|DYTG_MAXV|42.0|8.0|8.0|m/s|Maximum horizontal speed setpoint|不同于日志默认值|
+|DYTG_MAXYAWR|120.0|30.0|30.0|deg/s|Maximum yaw rate|不同于日志默认值|
+|DYTG_N_FOL|0.6000000238418579|2.0|2.0||Follow navigation gain|不同于日志默认值|
+|DYTG_N_INT|3.5||||Intercept navigation gain||
+|DYTG_POFF|0.0|||deg|Gimbal pitch offset||
+|DYTG_PREDMAX|0.029999999329447746|0.20000000298023224|0.20000000298023224|s|Maximum LOS prediction horizon|不同于日志默认值|
+|DYTG_PSIGN|1||||Gimbal pitch sign||
+|DYTG_RELOCKN|10|3|3||Consecutive lock frames to recover from lost hold|不同于日志默认值|
+|DYTG_ROFF|0.0|||deg|Gimbal roll offset||
+|DYTG_RSIGN|1||||Gimbal roll sign||
+|DYTG_RTRYMS|1000|||ms|Lost target relock retry interval||
+|DYTG_SC_DWEL|0.20000000298023224|||s|Search dwell time||
+|DYTG_SC_PAUSE|0.05000000074505806|||s|Search edge pause||
+|DYTG_SC_PSPD|3.0|||deg/s|Search pitch speed||
+|DYTG_SC_STEP|20.0|||deg|Search pitch step||
+|DYTG_SC_YSPD|3.0|||deg/s|Search yaw speed||
+|DYTG_SC_YSTP|10.0|||deg|Search yaw step||
+|DYTG_STK_TK|0.30000001192092896||||Manual takeover stick threshold||
+|DYTG_TGT_ID|1||||Midcourse target MAV_SYS_ID||
+|DYTG_TGT_TO|2.0|||s|Midcourse target position timeout||
+|DYTG_VMIN|1.0|||m/s|Minimum closing speed proxy||
+|DYTG_V_FOL|40.0|2.0|2.0|m/s|Follow commanded speed|不同于日志默认值|
+|DYTG_V_INT|6.0|||m/s|Intercept commanded speed||
+|DYTG_WAITMS|1500|||ms|Search wait timeout||
+|DYTG_XYDB|0.11999999731779099|0.20000000298023224|0.20000000298023224||Horizontal LOS deadband near vertical target|不同于日志默认值|
+|DYTG_XYFULL|0.8500000238418579|0.6000000238418579|0.6000000238418579||Horizontal LOS value for full XY tracking|不同于日志默认值|
+|DYTG_XYOVR_EN|0||||Enable XY overshoot guard||
+|DYTG_XYOVR_MIN|0.15000000596046448||||Minimum XY scale during XY overshoot guard||
+|DYTG_XYOVR_V|2.0|||m/s|Reverse horizontal closing speed for full XY overshoot guard||
+|DYTG_XYOVR_Z|0.6000000238418579|0.75|0.75||Vertical LOS threshold for XY overshoot guard|不同于日志默认值|
+|DYTG_XYROT_EN|1|0|0||Enable XY LOS turn-rate guard|不同于日志默认值|
+|DYTG_XYROT_MIN|0.15000000596046448|0.20000000298023224|0.20000000298023224||Minimum XY scale during LOS turn-rate guard|不同于日志默认值|
+|DYTG_XYROT_W|0.800000011920929|1.0|1.0|rad/s|Horizontal LOS turn rate for full XY guard|不同于日志默认值|
+|DYTG_XYSLEW|15.0|3.0|3.0|m/s^2|Horizontal velocity setpoint slew rate|不同于日志默认值|
+|DYTG_YAWLIM|30.0|25.0|25.0|deg|Maximum yaw lag|不同于日志默认值|
+|DYTG_YAWLOS|0.11999999731779099|0.20000000298023224|0.20000000298023224||Minimum horizontal LOS for yaw tracking|不同于日志默认值|
+|DYTG_YOFF|0.0|||deg|Gimbal yaw offset||
+|DYTG_YSIGN|1||||Gimbal yaw sign||
+|DYTG_ZSCALE|0.3499999940395355|0.25|0.25||Vertical tracking scale|不同于日志默认值|
+|DYTG_ZXY_EN|1|0|0||Enable vertical-priority XY scaling|不同于日志默认值|
+|DYTG_ZXY_FULL|0.800000011920929|0.699999988079071|0.699999988079071||Vertical LOS value for maximum XY reduction|不同于日志默认值|
+|DYTG_ZXY_MIN|0.3499999940395355|0.25|0.25||Minimum XY scale during vertical-priority tracking|不同于日志默认值|
+
+## cooperative_rendezvous / CRDZ_* 全部参数
+
+|参数|当前值|system默认|setup默认|单位|说明|备注|
+|---|---|---|---|---|---|---|
+|CRDZ_ACT_AUX|-1|3|3||Activation AUX channel|不同于日志默认值|
+|CRDZ_ACT_BTN|0|-1|-1||Activation joystick button|不同于日志默认值|
+|CRDZ_ALT_DIFF|0.0|||m|Altitude difference from target||
+|CRDZ_APP_SPD|40.0|||||当前源码/metadata未找到定义|
+|CRDZ_DIST|0.0|||m|Horizontal distance from target||
+|CRDZ_SLOW_RAD|5.0|||||当前源码/metadata未找到定义|
+
+## 速度/加速度/角速度/空速/加速度计相关参数
+
+### Commander速度/风速门限
+
+|参数|当前值|system默认|setup默认|单位|说明|备注|
+|---|---|---|---|---|---|---|
+|COM_ARM_IMU_GYR|0.25|||rad/s|Maximum rate gyro inconsistency between IMU units that will allow arming||
+|COM_THROW_SPEED|5.0|||m/s|Minimum speed for the throw start||
+|COM_VEL_FS_EVH|1.0|||m/s|Horizontal velocity error threshold||
+|COM_WIND_MAX|-1.0|||m/s|High wind speed failsafe threshold||
+|COM_WIND_WARN|-1.0|||m/s|Wind speed warning threshold||
+
+### Follow Target速度
+
+|参数|当前值|system默认|setup默认|单位|说明|备注|
+|---|---|---|---|---|---|---|
+|FLW_TGT_MAX_VEL|5.0||||Maximum tangential velocity setting for generating the follow orbit trajectory||
+
+### Rover速度
+
+|参数|当前值|system默认|setup默认|单位|说明|备注|
+|---|---|---|---|---|---|---|
+|RO_SPEED_LIM|-1.0|||m/s|Speed limit||
+
+### Weather-vane角速度
+
+|参数|当前值|system默认|setup默认|单位|说明|备注|
+|---|---|---|---|---|---|---|
+|WV_YRATE_MAX|90.0|||deg/s|Maximum yawrate the weathervane controller is allowed to demand||
+
+### cooperative_rendezvous模块
+
+|参数|当前值|system默认|setup默认|单位|说明|备注|
+|---|---|---|---|---|---|---|
+|CRDZ_APP_SPD|40.0|||||当前源码/metadata未找到定义|
+|CRDZ_SLOW_RAD|5.0|||||当前源码/metadata未找到定义|
+
+### 估计器速度/加速度
+
+|参数|当前值|system默认|setup默认|单位|说明|备注|
+|---|---|---|---|---|---|---|
+|EKF2_ABIAS_INIT|0.20000000298023224|||m/s^2|1-sigma IMU accelerometer switch-on bias||
+|EKF2_ABL_ACCLIM|25.0|||m/s^2|Maximum IMU accel magnitude that allows IMU bias learning||
+|EKF2_ABL_GYRLIM|3.0|||rad/s|Maximum IMU gyro angular rate magnitude that allows IMU bias learning||
+|EKF2_ABL_LIM|0.4000000059604645|||m/s^2|Accelerometer bias learning limit||
+|EKF2_ABL_TAU|0.5|||s|Accel bias learning inhibit time constant||
+|EKF2_ACC_B_NOISE|0.003000000026077032|||m/s^3|Process noise for IMU accelerometer bias prediction||
+|EKF2_ACC_NOISE|0.3499999940395355|||m/s^2|Accelerometer noise for covariance prediction||
+|EKF2_ARSP_THR|0.0|||m/s|Airspeed fusion threshold||
+|EKF2_ASPD_MAX|20.0|||m/s|Maximum airspeed used for baro static pressure compensation||
+|EKF2_ASP_DELAY|100.0|||ms|Airspeed measurement delay relative to IMU measurements||
+|EKF2_AVEL_DELAY|5.0|||ms|Auxiliary Velocity Estimate delay relative to IMU measurements||
+|EKF2_BETA_NOISE|0.30000001192092896|||m/s|Noise for synthetic sideslip fusion||
+|EKF2_EAS_NOISE|1.399999976158142|||m/s|Measurement noise for airspeed fusion||
+|EKF2_EVV_GATE|3.0|||SD|Gate size for vision velocity estimate fusion||
+|EKF2_EVV_NOISE|0.10000000149011612|||m/s|Measurement noise for vision velocity measurements||
+|EKF2_GBIAS_INIT|0.10000000149011612|||rad/s|1-sigma IMU gyro switch-on bias||
+|EKF2_GPS_V_GATE|5.0|||SD|Gate size for GNSS velocity fusion||
+|EKF2_GPS_V_NOISE|0.30000001192092896|||m/s|Measurement noise for GNSS velocity||
+|EKF2_GRAV_NOISE|1.0|||g0|Accelerometer measurement noise for gravity based observations||
+|EKF2_GSF_TAS|15.0|||m/s|Default value of true airspeed used in EKF-GSF AHRS calculation||
+|EKF2_GYR_B_LIM|0.15000000596046448|||rad/s|Gyro bias learning limit||
+|EKF2_GYR_NOISE|0.014999999664723873|||rad/s|Rate gyro noise for covariance prediction||
+|EKF2_MAG_ACCLIM|0.5|||m/s^2|Horizontal acceleration threshold used for heading observability check||
+|EKF2_OF_N_MAX|0.5|||rad/s|Optical flow maximum noise||
+|EKF2_OF_N_MIN|0.15000000596046448|||rad/s|Optical flow minimum noise||
+|EKF2_REQ_HDRIFT|0.10000000149011612|||m/s|Maximum horizontal drift speed to use GPS||
+|EKF2_REQ_SACC|0.5|||m/s|Required speed accuracy to use GPS||
+|EKF2_REQ_VDRIFT|0.20000000298023224|||m/s|Maximum vertical drift speed to use GPS||
+|EKF2_RNG_A_VMAX|1.0|||m/s|Maximum horizontal velocity allowed for conditional range aid mode||
+|EKF2_SEL_IMU_ACC|1.0|||m/s^2|Selector acceleration threshold||
+|EKF2_SEL_IMU_RAT|7.0|||deg/s|Selector angular rate threshold||
+|EKF2_SEL_IMU_VEL|2.0|||m/s|Selector angular threshold||
+|EKF2_TAU_VEL|0.25|||s|Time constant of the velocity output prediction and smoothing filter||
+|EKF2_TERR_NOISE|5.0|||m/s|Terrain altitude process noise||
+|EKF2_VEL_LIM|100.0|||m/s|Velocity limit||
+|EKF2_WIND_NSD|0.05000000074505806|||m/s^2/sqrt(Hz)|Process noise spectral density for wind velocity prediction||
+|HTE_ACC_GATE|3.0|||SD|Gate size for acceleration fusion||
+|HTE_VXY_THR|10.0|||m/s|Horizontal velocity threshold for sensitivity reduction||
+|HTE_VZ_THR|2.0|||m/s|Vertical velocity threshold for sensitivity reduction||
+
+### 其他速度/加速度相关
+
+|参数|当前值|system默认|setup默认|单位|说明|备注|
+|---|---|---|---|---|---|---|
+|CAL_GYRO0_XOFF|-0.0019304546294733882|||rad/s|Gyroscope 0 X-axis offset||
+|CAL_GYRO0_YOFF|0.001789976959116757|||rad/s|Gyroscope 0 Y-axis offset||
+|CAL_GYRO0_ZOFF|-0.002037395490333438|||rad/s|Gyroscope 0 Z-axis offset||
+|CAL_GYRO1_XOFF|0.01487364899367094|||rad/s|Gyroscope 1 X-axis offset||
+|CAL_GYRO1_YOFF|-0.018111485987901688|||rad/s|Gyroscope 1 Y-axis offset||
+|CAL_GYRO1_ZOFF|0.0022409388329833746|||rad/s|Gyroscope 1 Z-axis offset||
+|VT_B_DEC_MSS|2.0|||m/s^2|Approximate deceleration during back transition||
+
+### 加速度计/IMU相关
+
+|参数|当前值|system默认|setup默认|单位|说明|备注|
+|---|---|---|---|---|---|---|
+|CAL_ACC0_ID|2818058|0|0||Accelerometer 0 calibration device ID|不同于日志默认值|
+|CAL_ACC0_PRIO|50|-1|-1||Accelerometer 0 priority|不同于日志默认值|
+|CAL_ACC0_ROT|-1||||Accelerometer 0 rotation relative to airframe||
+|CAL_ACC0_XOFF|-0.06857442855834961|||m/s^2|Accelerometer 0 X-axis offset||
+|CAL_ACC0_XSCALE|1.0||||Accelerometer 0 X-axis scaling factor||
+|CAL_ACC0_YOFF|-0.0572962760925293|||m/s^2|Accelerometer 0 Y-axis offset||
+|CAL_ACC0_YSCALE|1.0||||Accelerometer 0 Y-axis scaling factor||
+|CAL_ACC0_ZOFF|0.02713298797607422|||m/s^2|Accelerometer 0 Z-axis offset||
+|CAL_ACC0_ZSCALE|1.0||||Accelerometer 0 Z-axis scaling factor||
+|CAL_ACC1_ID|3014674|0|0||Accelerometer 1 calibration device ID|不同于日志默认值|
+|CAL_ACC1_PRIO|50|-1|-1||Accelerometer 1 priority|不同于日志默认值|
+|CAL_ACC1_ROT|-1||||Accelerometer 1 rotation relative to airframe||
+|CAL_ACC1_XOFF|-0.008933544158935547|||m/s^2|Accelerometer 1 X-axis offset||
+|CAL_ACC1_XSCALE|1.0||||Accelerometer 1 X-axis scaling factor||
+|CAL_ACC1_YOFF|-0.011250972747802734|||m/s^2|Accelerometer 1 Y-axis offset||
+|CAL_ACC1_YSCALE|1.0||||Accelerometer 1 Y-axis scaling factor||
+|CAL_ACC1_ZOFF|0.028811931610107422|||m/s^2|Accelerometer 1 Z-axis offset||
+|CAL_ACC1_ZSCALE|1.0||||Accelerometer 1 Z-axis scaling factor||
+|CAL_ACC2_ID|0||||Accelerometer 2 calibration device ID||
+|CAL_ACC3_ID|0||||Accelerometer 3 calibration device ID||
+|COM_ARM_IMU_ACC|0.699999988079071|||m/s^2|Maximum accelerometer inconsistency between IMU units that will allow arming||
+|IMU_ACCEL_CUTOFF|30.0|||Hz|Low pass filter cutoff frequency for accel||
+|IMU_DGYRO_CUTOFF|20.0|||Hz|Cutoff frequency for angular acceleration (D-Term filter)||
+|SYS_CAL_ACCEL|0||||Enable auto start of accelerometer thermal calibration at the next power up||
+|TC_A_ENABLE|0||||Thermal compensation for accelerometer sensors||
+
+### 固定翼/空速/空速传感器
+
+|参数|当前值|system默认|setup默认|单位|说明|备注|
+|---|---|---|---|---|---|---|
+|ASPD_SCALE_1|1.0||||Scale of airspeed sensor 1||
+|CAL_AIR_CMODEL|0||||Airspeed sensor compensation model for the SDP3x||
+|CAL_AIR_TUBED_MM|1.5|||mm|Airspeed sensor tube diameter. Only used for the Tube Pressure Drop Compensation||
+|CAL_AIR_TUBELEN|0.20000000298023224|||m|Airspeed sensor tube length||
+|FW_AIRSPD_MAX|20.0|||m/s|Maximum Airspeed (CAS)||
+|FW_AIRSPD_TRIM|15.0|||m/s|Trim (Cruise) Airspeed||
+|FW_T_CLMB_R_SP|3.0|||m/s|Default target climbrate||
+|FW_T_SINK_R_SP|2.0|||m/s|Default target sinkrate||
+|SYS_HAS_NUM_ASPD|0||||Control if the vehicle has an airspeed sensor||
+|UAVCAN_SUB_ASPD|0||||subscription airspeed||
+
+### 多旋翼位置/速度控制
+
+|参数|当前值|system默认|setup默认|单位|说明|备注|
+|---|---|---|---|---|---|---|
+|MPC_ACC_DECOUPLE|1||||Acceleration to tilt coupling||
+|MPC_ACC_DOWN_MAX|3.0|||m/s^2|Maximum downwards acceleration in climb rate controlled modes||
+|MPC_ACC_HOR|6.0|3.0|3.0|m/s^2|Acceleration for autonomous and for manual modes|不同于日志默认值|
+|MPC_ACC_HOR_MAX|10.0|2.0|2.0|m/s^2|Maximum horizontal acceleration|不同于日志默认值|
+|MPC_ACC_UP_MAX|7.0|4.0|4.0|m/s^2|Maximum upwards acceleration in climb rate controlled modes|不同于日志默认值|
+|MPC_HOLD_MAX_XY|0.800000011920929|||m/s|Maximum horizontal velocity for which position hold is enabled (use 0 to disable check)||
+|MPC_HOLD_MAX_Z|0.6000000238418579|||m/s|Maximum vertical velocity for which position hold is enabled (use 0 to disable check)||
+|MPC_JERK_AUTO|2.0|4.0|4.0|m/s^3|Jerk limit in autonomous modes|不同于日志默认值|
+|MPC_JERK_MAX|12.0|3.0|3.0|m/s^3|Maximum horizontal and vertical jerk in Position/Altitude mode|不同于日志默认值|
+|MPC_LAND_CRWL|0.30000001192092896|||m/s|Land crawl descend rate||
+|MPC_LAND_SPEED|0.699999988079071|||m/s|Landing descend rate||
+|MPC_MAN_Y_MAX|150.0|||deg/s|Max manual yaw rate for Stabilized, Altitude, Position mode||
+|MPC_MAN_Y_TAU|0.07999999821186066|||s|Manual yaw rate input filter time constant||
+|MPC_TKO_SPEED|3.0|1.5|1.5|m/s|Takeoff climb rate|不同于日志默认值|
+|MPC_VELD_LP|5.0|||Hz|Velocity derivative low pass cutoff frequency||
+|MPC_VEL_LP|0.0|||Hz|Velocity low pass cutoff frequency||
+|MPC_VEL_MANUAL|3.0|10.0|10.0|m/s|Maximum horizontal velocity setpoint in Position mode|不同于日志默认值|
+|MPC_VEL_MAN_BACK|-1.0|||m/s|Maximum backward velocity in Position mode||
+|MPC_VEL_MAN_SIDE|-1.0|||m/s|Maximum sideways velocity in Position mode||
+|MPC_VEL_NF_BW|5.0|||Hz|Velocity notch filter bandwidth||
+|MPC_VEL_NF_FRQ|0.0|||Hz|Velocity notch filter frequency||
+|MPC_XY_CRUISE|3.0|5.0|5.0|m/s|Default horizontal velocity in autonomous modes|不同于日志默认值|
+|MPC_XY_VEL_ALL|-10.0||||Overall Horizontal Velocity Limit||
+|MPC_XY_VEL_D_ACC|0.20000000298023224||||Differential gain for horizontal velocity error||
+|MPC_XY_VEL_I_ACC|0.5|0.4000000059604645|0.4000000059604645||Integral gain for horizontal velocity error|不同于日志默认值|
+|MPC_XY_VEL_MAX|45.0|100.0|100.0|m/s|Maximum horizontal velocity|不同于日志默认值|
+|MPC_XY_VEL_P_ACC|2.0|1.7999999523162842|1.7999999523162842||Proportional gain for horizontal velocity error|不同于日志默认值|
+|MPC_YAWRAUTO_ACC|20.0|||deg/s^2|Maximum yaw acceleration in autonomous modes||
+|MPC_YAWRAUTO_MAX|60.0|||deg/s|Maximum yaw rate in autonomous modes||
+|MPC_Z_VEL_ALL|-3.0||||Overall Vertical Velocity Limit||
+|MPC_Z_VEL_D_ACC|0.0||||Differential gain for vertical velocity error||
+|MPC_Z_VEL_I_ACC|2.0||||Integral gain for vertical velocity error||
+|MPC_Z_VEL_MAX_DN|20.0|50.0|50.0|m/s|Maximum descent velocity|不同于日志默认值|
+|MPC_Z_VEL_MAX_UP|30.0|50.0|50.0|m/s|Maximum ascent velocity|不同于日志默认值|
+|MPC_Z_VEL_P_ACC|4.0||||Proportional gain for vertical velocity error||
+|MPC_Z_V_AUTO_DN|3.0|1.5|1.5|m/s|Descent velocity in autonomous modes|不同于日志默认值|
+|MPC_Z_V_AUTO_UP|5.0|3.0|3.0|m/s|Ascent velocity in autonomous modes|不同于日志默认值|
+
+### 多旋翼角速度控制
+
+|参数|当前值|system默认|setup默认|单位|说明|备注|
+|---|---|---|---|---|---|---|
+|MC_ACRO_P_MAX|100.0|||deg/s|Acro mode maximum pitch rate||
+|MC_ACRO_R_MAX|100.0|||deg/s|Acro mode maximum roll rate||
+|MC_ACRO_Y_MAX|100.0|||deg/s|Acro mode maximum yaw rate||
+|MC_PITCHRATE_D|0.0|0.003000000026077032|0.003000000026077032||Pitch rate D gain|不同于日志默认值|
+|MC_PITCHRATE_FF|0.0||||Pitch rate feedforward||
+|MC_PITCHRATE_I|0.11999999731779099|0.20000000298023224|0.20000000298023224||Pitch rate I gain|不同于日志默认值|
+|MC_PITCHRATE_K|1.0||||Pitch rate controller gain||
+|MC_PITCHRATE_MAX|180.0|220.0|220.0|deg/s|Max pitch rate|不同于日志默认值|
+|MC_PITCHRATE_P|0.10000000149011612|0.15000000596046448|0.15000000596046448||Pitch rate P gain|不同于日志默认值|
+|MC_PR_INT_LIM|0.30000001192092896||||Pitch rate integrator limit||
+|MC_ROLLRATE_D|0.0|0.003000000026077032|0.003000000026077032||Roll rate D gain|不同于日志默认值|
+|MC_ROLLRATE_FF|0.0||||Roll rate feedforward||
+|MC_ROLLRATE_I|0.11999999731779099|0.20000000298023224|0.20000000298023224||Roll rate I gain|不同于日志默认值|
+|MC_ROLLRATE_K|1.0||||Roll rate controller gain||
+|MC_ROLLRATE_MAX|180.0|220.0|220.0|deg/s|Max roll rate|不同于日志默认值|
+|MC_ROLLRATE_P|0.10000000149011612|0.15000000596046448|0.15000000596046448||Roll rate P gain|不同于日志默认值|
+|MC_RR_INT_LIM|0.30000001192092896||||Roll rate integrator limit||
+|MC_SLOW_DEF_HVEL|3.0|||m/s|Default horizontal velocity limit||
+|MC_SLOW_DEF_VVEL|1.0|||m/s|Default vertical velocity limit||
+|MC_SLOW_DEF_YAWR|45.0|||deg/s|Default yaw rate limit||
+|MC_SLOW_MAP_HVEL|0||||Manual input mapped to scale horizontal velocity in position slow mode||
+|MC_SLOW_MAP_PTCH|0||||RC_MAP_AUX{N} to allow for gimbal pitch rate control in position slow mode||
+|MC_SLOW_MAP_VVEL|0||||Manual input mapped to scale vertical velocity in position slow mode||
+|MC_SLOW_MAP_YAWR|0||||Manual input mapped to scale yaw rate in position slow mode||
+|MC_SLOW_MIN_HVEL|0.30000001192092896|||m/s|Horizontal velocity lower limit||
+|MC_SLOW_MIN_VVEL|0.30000001192092896|||m/s|Vertical velocity lower limit||
+|MC_SLOW_MIN_YAWR|3.0|||deg/s|Yaw rate lower limit||
+|MC_YAWRATE_D|0.0||||Yaw rate D gain||
+|MC_YAWRATE_FF|0.0||||Yaw rate feedforward||
+|MC_YAWRATE_I|0.10000000149011612||||Yaw rate I gain||
+|MC_YAWRATE_K|1.0||||Yaw rate controller gain||
+|MC_YAWRATE_MAX|90.0|200.0|200.0|deg/s|Max yaw rate|不同于日志默认值|
+|MC_YAWRATE_P|0.20000000298023224||||Yaw rate P gain||
+|MC_YR_INT_LIM|0.30000001192092896||||Yaw rate integrator limit||
+
+### 导引头模块
+
+|参数|当前值|system默认|setup默认|单位|说明|备注|
+|---|---|---|---|---|---|---|
+|DYTG_KA_FOL|0.5|1.2000000476837158|1.2000000476837158|m/s^2|Follow LOS acceleration gain|不同于日志默认值|
+|DYTG_KA_INT|2.0|||m/s^2|Intercept LOS acceleration gain||
+|DYTG_MAXACC|8.0|4.0|4.0|m/s^2|Maximum acceleration feedforward|不同于日志默认值|
+|DYTG_MAXDZ|8.0|1.0|1.0|m/s|Maximum vertical speed magnitude|不同于日志默认值|
+|DYTG_MAXV|42.0|8.0|8.0|m/s|Maximum horizontal speed setpoint|不同于日志默认值|
+|DYTG_MAXYAWR|120.0|30.0|30.0|deg/s|Maximum yaw rate|不同于日志默认值|
+|DYTG_SC_PSPD|3.0|||deg/s|Search pitch speed||
+|DYTG_SC_YSPD|3.0|||deg/s|Search yaw speed||
+|DYTG_VMIN|1.0|||m/s|Minimum closing speed proxy||
+|DYTG_V_FOL|40.0|2.0|2.0|m/s|Follow commanded speed|不同于日志默认值|
+|DYTG_V_INT|6.0|||m/s|Intercept commanded speed||
+|DYTG_XYDB|0.11999999731779099|0.20000000298023224|0.20000000298023224||Horizontal LOS deadband near vertical target|不同于日志默认值|
+|DYTG_XYFULL|0.8500000238418579|0.6000000238418579|0.6000000238418579||Horizontal LOS value for full XY tracking|不同于日志默认值|
+|DYTG_XYOVR_EN|0||||Enable XY overshoot guard||
+|DYTG_XYOVR_MIN|0.15000000596046448||||Minimum XY scale during XY overshoot guard||
+|DYTG_XYOVR_V|2.0|||m/s|Reverse horizontal closing speed for full XY overshoot guard||
+|DYTG_XYOVR_Z|0.6000000238418579|0.75|0.75||Vertical LOS threshold for XY overshoot guard|不同于日志默认值|
+|DYTG_XYROT_EN|1|0|0||Enable XY LOS turn-rate guard|不同于日志默认值|
+|DYTG_XYROT_MIN|0.15000000596046448|0.20000000298023224|0.20000000298023224||Minimum XY scale during LOS turn-rate guard|不同于日志默认值|
+|DYTG_XYROT_W|0.800000011920929|1.0|1.0|rad/s|Horizontal LOS turn rate for full XY guard|不同于日志默认值|
+|DYTG_XYSLEW|15.0|3.0|3.0|m/s^2|Horizontal velocity setpoint slew rate|不同于日志默认值|
+|DYTG_YAWLOS|0.11999999731779099|0.20000000298023224|0.20000000298023224||Minimum horizontal LOS for yaw tracking|不同于日志默认值|
+|DYTG_ZSCALE|0.3499999940395355|0.25|0.25||Vertical tracking scale|不同于日志默认值|
+|DYTG_ZXY_EN|1|0|0||Enable vertical-priority XY scaling|不同于日志默认值|
+|DYTG_ZXY_FULL|0.800000011920929|0.699999988079071|0.699999988079071||Vertical LOS value for maximum XY reduction|不同于日志默认值|
+|DYTG_ZXY_MIN|0.3499999940395355|0.25|0.25||Minimum XY scale during vertical-priority tracking|不同于日志默认值|
+
+### 降落检测速度
+
+|参数|当前值|system默认|setup默认|单位|说明|备注|
+|---|---|---|---|---|---|---|
+|LNDMC_ROT_MAX|20.0|||deg/s|Multicopter max rotational speed||
+|LNDMC_XY_VEL_MAX|1.5|||m/s|Multicopter max horizontal velocity||
+|LNDMC_Z_VEL_MAX|0.25|||m/s|Multicopter vertical velocity threshold||

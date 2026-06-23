@@ -95,7 +95,12 @@ bool CooperativeRendezvous::rendezvous_switch_enabled() const
 
 bool CooperativeRendezvous::dyt_guidance_active() const
 {
-	return _dyt_guidance_status.active && _dyt_guidance_status.timestamp != 0 &&
+	// Yield to the seeker only while it is actually commanding aircraft motion
+	// (camera locked and tracking). While the seeker is just searching or has lost
+	// the target it controls the gimbal only, so the position-sharing follower keeps
+	// driving the aircraft. This is the single handoff boundary between the two
+	// controllers so they never publish trajectory setpoints at the same time.
+	return _dyt_guidance_status.controlling_vehicle && _dyt_guidance_status.timestamp != 0 &&
 	       hrt_elapsed_time(&_dyt_guidance_status.timestamp) < 500_ms;
 }
 
@@ -164,14 +169,16 @@ bool CooperativeRendezvous::update_target_from_link()
 	return updated;
 }
 
-bool CooperativeRendezvous::target_position_local(const vehicle_local_position_s &local_pos,
-		matrix::Vector3f &target_position) const
+bool CooperativeRendezvous::target_state_local(const vehicle_local_position_s &local_pos,
+		matrix::Vector3f &target_position, matrix::Vector3f &target_velocity)
 {
 	if (!_map_ref_initialized || _last_target_time == 0) {
+		reset_target_filter();
 		return false;
 	}
 
 	if ((hrt_absolute_time() - _last_target_time) > static_cast<hrt_abstime>(_options.target_timeout_s * 1_s)) {
+		reset_target_filter();
 		return false;
 	}
 
@@ -180,15 +187,135 @@ bool CooperativeRendezvous::target_position_local(const vehicle_local_position_s
 	_map_ref.project(_target_info.lat, _target_info.lon, x, y);
 
 	if (!PX4_ISFINITE(x) || !PX4_ISFINITE(y)) {
+		reset_target_filter();
 		return false;
 	}
 
-	target_position(0) = x + _options.target_offset(0);
-	target_position(1) = y + _options.target_offset(1);
-	target_position(2) = (static_cast<float>(local_pos.ref_alt) - static_cast<float>(_target_info.alt)) +
-			     _options.target_offset(2);
+	matrix::Vector3f raw_position(x, y, static_cast<float>(local_pos.ref_alt) - static_cast<float>(_target_info.alt));
+	matrix::Vector3f raw_velocity(static_cast<float>(_target_info.vx), static_cast<float>(_target_info.vy),
+				      static_cast<float>(_target_info.vz));
+
+	if (!PX4_ISFINITE(raw_velocity(0)) || !PX4_ISFINITE(raw_velocity(1)) || !PX4_ISFINITE(raw_velocity(2))) {
+		raw_velocity.zero();
+	}
+
+	apply_target_filter(raw_position, raw_velocity, target_position, target_velocity);
+
+	float offset_x = _options.target_offset(0);
+	float offset_y = _options.target_offset(1);
+
+	if (_param_xy_offset_enable.get() > 0) {
+		const float x_offset = _param_x_offset.get();
+		const float y_offset = _param_y_offset.get();
+
+		offset_x = PX4_ISFINITE(x_offset) ? x_offset : 0.f;
+		offset_y = PX4_ISFINITE(y_offset) ? y_offset : 0.f;
+
+	} else {
+		const float target_distance = _param_dist.get();
+
+		if (PX4_ISFINITE(target_distance) && target_distance >= 0.f) {
+			const float offset_norm = sqrtf(offset_x * offset_x + offset_y * offset_y);
+
+			if (offset_norm > 0.001f) {
+				const float scale = target_distance / offset_norm;
+				offset_x *= scale;
+				offset_y *= scale;
+
+			} else {
+				offset_x = -target_distance;
+				offset_y = 0.f;
+			}
+		}
+	}
+
+	target_position(0) += offset_x;
+	target_position(1) += offset_y;
+	target_position(2) += _options.target_offset(2) - _param_alt_diff.get();
 
 	return PX4_ISFINITE(target_position(2));
+}
+
+void CooperativeRendezvous::apply_target_filter(const matrix::Vector3f &raw_position,
+		const matrix::Vector3f &raw_velocity, matrix::Vector3f &target_position, matrix::Vector3f &target_velocity)
+{
+	const float position_tc = _param_target_position_tc.get();
+	const float velocity_tc = _param_target_velocity_tc.get();
+	const float max_position_jump = _param_target_position_jump.get();
+	const bool filter_enabled = (PX4_ISFINITE(position_tc) && position_tc > 0.f) ||
+				    (PX4_ISFINITE(velocity_tc) && velocity_tc > 0.f) ||
+				    (PX4_ISFINITE(max_position_jump) && max_position_jump > 0.f);
+
+	if (!filter_enabled) {
+		reset_target_filter();
+		target_position = raw_position;
+		target_velocity = raw_velocity;
+		return;
+	}
+
+	const hrt_abstime now = hrt_absolute_time();
+	const bool new_sample = _last_target_filter_sample_time != _last_target_time;
+
+	if (!_target_filter_initialized) {
+		_target_position_input = raw_position;
+		_target_position_filtered = raw_position;
+		_target_velocity_input = raw_velocity;
+		_target_velocity_filtered = raw_velocity;
+		_last_target_filter_time = now;
+		_last_target_filter_sample_time = _last_target_time;
+		_target_filter_initialized = true;
+	}
+
+	if (new_sample) {
+		matrix::Vector3f position_input = raw_position;
+
+		if (PX4_ISFINITE(max_position_jump) && max_position_jump > 0.f) {
+			const matrix::Vector3f delta = raw_position - _target_position_input;
+			const float delta_norm = delta.norm();
+			const float constrained_jump = math::constrain(max_position_jump, 0.1f, 200.f);
+
+			if (PX4_ISFINITE(delta_norm) && delta_norm > constrained_jump) {
+				position_input = _target_position_input + delta.normalized() * constrained_jump;
+			}
+		}
+
+		_target_position_input = position_input;
+		_target_velocity_input = raw_velocity;
+		_last_target_filter_sample_time = _last_target_time;
+	}
+
+	const float dt = math::constrain((now - _last_target_filter_time) * 1e-6f, 0.005f, 0.5f);
+
+	if (PX4_ISFINITE(position_tc) && position_tc > 0.f) {
+		const float alpha = dt / (math::constrain(position_tc, 0.02f, 10.f) + dt);
+		_target_position_filtered += (_target_position_input - _target_position_filtered) * alpha;
+
+	} else {
+		_target_position_filtered = _target_position_input;
+	}
+
+	if (PX4_ISFINITE(velocity_tc) && velocity_tc > 0.f) {
+		const float alpha = dt / (math::constrain(velocity_tc, 0.02f, 10.f) + dt);
+		_target_velocity_filtered += (_target_velocity_input - _target_velocity_filtered) * alpha;
+
+	} else {
+		_target_velocity_filtered = _target_velocity_input;
+	}
+
+	_last_target_filter_time = now;
+	target_position = _target_position_filtered;
+	target_velocity = _target_velocity_filtered;
+}
+
+void CooperativeRendezvous::reset_target_filter()
+{
+	_last_target_filter_time = 0;
+	_last_target_filter_sample_time = 0;
+	_target_filter_initialized = false;
+	_target_position_input.zero();
+	_target_position_filtered.zero();
+	_target_velocity_input.zero();
+	_target_velocity_filtered.zero();
 }
 
 void CooperativeRendezvous::publish_offboard_heartbeat(bool position_control, bool velocity_control)
@@ -203,14 +330,15 @@ void CooperativeRendezvous::publish_offboard_heartbeat(bool position_control, bo
 	_offboard_control_mode_pub.publish(mode);
 }
 
-void CooperativeRendezvous::publish_trajectory_setpoint(const matrix::Vector3f &position, float yaw)
+void CooperativeRendezvous::publish_trajectory_setpoint(const matrix::Vector3f &position, const matrix::Vector3f &velocity,
+		float yaw)
 {
 	trajectory_setpoint_s setpoint{};
 	setpoint.timestamp = hrt_absolute_time();
 
 	for (int i = 0; i < 3; i++) {
 		setpoint.position[i] = position(i);
-		setpoint.velocity[i] = static_cast<float>(NAN);
+		setpoint.velocity[i] = velocity(i);
 		setpoint.acceleration[i] = static_cast<float>(NAN);
 		setpoint.jerk[i] = static_cast<float>(NAN);
 	}
@@ -328,16 +456,18 @@ void CooperativeRendezvous::hold_position(const vehicle_local_position_s &local_
 void CooperativeRendezvous::keep_current_position_setpoint(const vehicle_local_position_s &local_pos)
 {
 	const matrix::Vector3f position(local_pos.x, local_pos.y, local_pos.z);
+	const matrix::Vector3f velocity(0.f, 0.f, 0.f);
 
 	publish_offboard_heartbeat(true, false);
-	publish_trajectory_setpoint(position, local_pos.heading);
+	publish_trajectory_setpoint(position, velocity, local_pos.heading);
 }
 
 void CooperativeRendezvous::run_rendezvous(const vehicle_local_position_s &local_pos, const vehicle_status_s &status)
 {
 	matrix::Vector3f target_position{};
+	matrix::Vector3f target_velocity{};
 
-	if (!target_position_local(local_pos, target_position)) {
+	if (!target_state_local(local_pos, target_position, target_velocity)) {
 		const hrt_abstime now = hrt_absolute_time();
 
 		if (now - _last_status_log > 2_s) {
@@ -354,17 +484,36 @@ void CooperativeRendezvous::run_rendezvous(const vehicle_local_position_s &local
 		}
 
 		hold_position(local_pos);
+		reset_velocity_slew();
 		return;
 	}
 
 	matrix::Vector3f current_position(local_pos.x, local_pos.y, local_pos.z);
 	matrix::Vector3f to_target = target_position - current_position;
 	const float distance = to_target.norm();
+	matrix::Vector3f velocity_sp = target_velocity;
+	matrix::Vector2f horizontal_error(to_target(0), to_target(1));
+	const float horizontal_distance = horizontal_error.norm();
+	const float configured_speed = _param_app_speed.get();
+	const float closing_speed = PX4_ISFINITE(configured_speed) && configured_speed > 0.f ?
+				     math::constrain(configured_speed, 0.5f, 80.f) :
+				     math::constrain(_options.max_speed, 0.5f, 80.f);
+	const float slow_radius = math::max(_param_slow_radius.get(), 0.5f);
+
+	if (horizontal_distance > 0.5f) {
+		const float speed_scale = math::constrain(horizontal_distance / slow_radius, 0.f, 1.f);
+		const float approach_speed = closing_speed * speed_scale;
+		const matrix::Vector2f approach_xy = horizontal_error / horizontal_distance * approach_speed;
+		velocity_sp(0) += approach_xy(0);
+		velocity_sp(1) += approach_xy(1);
+	}
+
+	slew_horizontal_velocity(velocity_sp, local_pos);
 
 	const float yaw = PX4_ISFINITE(_target_info.yaw) ? static_cast<float>(_target_info.yaw) : local_pos.heading;
 
 	publish_offboard_heartbeat(true, false);
-	publish_trajectory_setpoint(target_position, yaw);
+	publish_trajectory_setpoint(target_position, velocity_sp, yaw);
 
 	request_arm(status);
 
@@ -378,11 +527,59 @@ void CooperativeRendezvous::run_rendezvous(const vehicle_local_position_s &local
 	const hrt_abstime now = hrt_absolute_time();
 
 	if (now - _last_status_log > 2_s) {
-		PX4_INFO("cooperative rendezvous: target=%" PRIu32 " distance=%.1fm setpoint=(%.1f %.1f %.1f)",
+		PX4_INFO("cooperative rendezvous: target=%" PRIu32 " distance=%.1fm app_spd=%.1fm/s setpoint=(%.1f %.1f %.1f)",
 			 _options.target_id, (double)distance,
+			 (double)closing_speed,
 			 (double)target_position(0), (double)target_position(1), (double)target_position(2));
 		_last_status_log = now;
 	}
+}
+
+void CooperativeRendezvous::slew_horizontal_velocity(matrix::Vector3f &velocity_sp,
+		const vehicle_local_position_s &local_pos)
+{
+	const float slew_rate = _param_velocity_slew.get();
+
+	if (!PX4_ISFINITE(slew_rate) || slew_rate <= 0.f) {
+		reset_velocity_slew();
+		return;
+	}
+
+	const hrt_abstime now = hrt_absolute_time();
+	matrix::Vector2f target_velocity_xy(velocity_sp(0), velocity_sp(1));
+
+	if (!PX4_ISFINITE(target_velocity_xy(0)) || !PX4_ISFINITE(target_velocity_xy(1))) {
+		target_velocity_xy.zero();
+	}
+
+	if (_last_velocity_slew_time == 0) {
+		_last_velocity_sp_xy(0) = PX4_ISFINITE(local_pos.vx) ? local_pos.vx : 0.f;
+		_last_velocity_sp_xy(1) = PX4_ISFINITE(local_pos.vy) ? local_pos.vy : 0.f;
+		_last_velocity_slew_time = now;
+	}
+
+	if (!PX4_ISFINITE(_last_velocity_sp_xy(0)) || !PX4_ISFINITE(_last_velocity_sp_xy(1))) {
+		_last_velocity_sp_xy.zero();
+	}
+
+	const float dt = math::constrain((now - _last_velocity_slew_time) * 1e-6f, 0.005f, 0.2f);
+	const float max_delta = math::constrain(slew_rate, 0.1f, 20.f) * dt;
+	const matrix::Vector2f delta = target_velocity_xy - _last_velocity_sp_xy;
+
+	if (delta.norm() > max_delta) {
+		target_velocity_xy = _last_velocity_sp_xy + delta.normalized() * max_delta;
+	}
+
+	_last_velocity_sp_xy = target_velocity_xy;
+	_last_velocity_slew_time = now;
+	velocity_sp(0) = target_velocity_xy(0);
+	velocity_sp(1) = target_velocity_xy(1);
+}
+
+void CooperativeRendezvous::reset_velocity_slew()
+{
+	_last_velocity_slew_time = 0;
+	_last_velocity_sp_xy.zero();
 }
 
 void CooperativeRendezvous::Run()
@@ -416,6 +613,8 @@ void CooperativeRendezvous::Run()
 
 	if (active_role() == Role::Rendezvous) {
 		if (!rendezvous_switch_enabled() || dyt_guidance_active()) {
+			reset_velocity_slew();
+			reset_target_filter();
 			return;
 		}
 
@@ -423,7 +622,13 @@ void CooperativeRendezvous::Run()
 
 	} else if (active_role() == Role::Broadcast && status.arming_state == vehicle_status_s::ARMING_STATE_ARMED &&
 		   rendezvous_switch_enabled() && !dyt_guidance_active()) {
+		reset_velocity_slew();
+		reset_target_filter();
 		keep_current_position_setpoint(local_pos);
+
+	} else {
+		reset_velocity_slew();
+		reset_target_filter();
 	}
 }
 
@@ -444,11 +649,22 @@ int CooperativeRendezvous::print_status()
 		break;
 	}
 
-	PX4_INFO("running: vehicle=%" PRIu32 " role=%s target=%" PRIu32 " offset=(%.1f %.1f %.1f)",
+	PX4_INFO("running: vehicle=%" PRIu32 " role=%s target=%" PRIu32 " offset=(%.1f %.1f %.1f) xy_en=%ld xy=(%.1f %.1f) dist=%.1f app_spd=%.1f slow=%.1f vslew=%.1f tpos_tc=%.2f tvel_tc=%.2f tpos_jmp=%.1f alt_diff=%.1f",
 		 _vehicle_id, role, _options.target_id,
 		 (double)_options.target_offset(0),
 		 (double)_options.target_offset(1),
-		 (double)_options.target_offset(2));
+		 (double)_options.target_offset(2),
+		 static_cast<long>(_param_xy_offset_enable.get()),
+		 (double)_param_x_offset.get(),
+		 (double)_param_y_offset.get(),
+		 (double)_param_dist.get(),
+		 (double)_param_app_speed.get(),
+		 (double)_param_slow_radius.get(),
+		 (double)_param_velocity_slew.get(),
+		 (double)_param_target_position_tc.get(),
+		 (double)_param_target_velocity_tc.get(),
+		 (double)_param_target_position_jump.get(),
+		 (double)_param_alt_diff.get());
 	PX4_INFO("activation aux=%d enabled=%d dyt_active=%d",
 		 static_cast<int>(_param_act_aux.get()), rendezvous_switch_enabled(), dyt_guidance_active());
 	PX4_INFO("activation button=%d buttons=0x%04x",
@@ -518,7 +734,7 @@ int CooperativeRendezvous::task_spawn(int argc, char *argv[])
 			break;
 
 		case 'v':
-			options.max_speed = math::constrain(strtof(myoptarg, nullptr), 0.5f, 20.f);
+			options.max_speed = math::constrain(strtof(myoptarg, nullptr), 0.5f, 50.f);
 			break;
 
 		case 'T':
@@ -591,7 +807,7 @@ MAV_SYS_ID=2 flies to a configurable offset near aircraft 1.
 	PRINT_MODULE_USAGE_PARAM_FLOAT('x', -5.f, -100.f, 100.f, "Target NED x offset", true);
 	PRINT_MODULE_USAGE_PARAM_FLOAT('y', 0.f, -100.f, 100.f, "Target NED y offset", true);
 	PRINT_MODULE_USAGE_PARAM_FLOAT('z', 0.f, -50.f, 50.f, "Target NED z offset", true);
-	PRINT_MODULE_USAGE_PARAM_FLOAT('v', 3.f, 0.5f, 20.f, "Maximum approach speed", true);
+	PRINT_MODULE_USAGE_PARAM_FLOAT('v', 3.f, 0.5f, 50.f, "Maximum approach speed", true);
 	PRINT_MODULE_USAGE_PARAM_FLOAT('T', 2.f, 0.5f, 10.f, "Target timeout", true);
 	PRINT_MODULE_USAGE_PARAM_FLAG('A', "Auto arm rendezvous aircraft", true);
 	PRINT_MODULE_USAGE_PARAM_FLAG('F', "Relax link/manual/offboard failsafes for simulation", true);

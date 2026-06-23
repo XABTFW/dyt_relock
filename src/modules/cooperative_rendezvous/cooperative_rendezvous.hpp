@@ -67,11 +67,17 @@ private:
 	bool update_map_projection(const vehicle_local_position_s &local_pos);
 	void publish_own_position(const vehicle_local_position_s &local_pos);
 	bool update_target_from_link();
-	bool target_position_local(const vehicle_local_position_s &local_pos, matrix::Vector3f &target_position) const;
+	bool target_state_local(const vehicle_local_position_s &local_pos, matrix::Vector3f &target_position,
+				matrix::Vector3f &target_velocity);
+	void apply_target_filter(const matrix::Vector3f &raw_position, const matrix::Vector3f &raw_velocity,
+				 matrix::Vector3f &target_position, matrix::Vector3f &target_velocity);
+	void reset_target_filter();
 	void run_rendezvous(const vehicle_local_position_s &local_pos, const vehicle_status_s &status);
+	void slew_horizontal_velocity(matrix::Vector3f &velocity_sp, const vehicle_local_position_s &local_pos);
+	void reset_velocity_slew();
 	void keep_current_position_setpoint(const vehicle_local_position_s &local_pos);
 	void publish_offboard_heartbeat(bool position_control, bool velocity_control);
-	void publish_trajectory_setpoint(const matrix::Vector3f &position, float yaw);
+	void publish_trajectory_setpoint(const matrix::Vector3f &position, const matrix::Vector3f &velocity, float yaw);
 	void request_offboard(const vehicle_status_s &status);
 	void request_arm(const vehicle_status_s &status);
 	void hold_position(const vehicle_local_position_s &local_pos);
@@ -88,7 +94,16 @@ private:
 	hrt_abstime _last_mode_request{0};
 	hrt_abstime _last_arm_request{0};
 	hrt_abstime _last_status_log{0};
+	hrt_abstime _last_velocity_slew_time{0};
+	hrt_abstime _last_target_filter_time{0};
+	hrt_abstime _last_target_filter_sample_time{0};
 	bool _failsafes_configured{false};
+	bool _target_filter_initialized{false};
+	matrix::Vector2f _last_velocity_sp_xy{};
+	matrix::Vector3f _target_position_input{};
+	matrix::Vector3f _target_position_filtered{};
+	matrix::Vector3f _target_velocity_input{};
+	matrix::Vector3f _target_velocity_filtered{};
 
 	manual_control_setpoint_s _manual_control{};
 	dyt_guidance_status_s _dyt_guidance_status{};
@@ -107,6 +122,17 @@ private:
 
 	DEFINE_PARAMETERS(
 		(ParamInt<px4::params::CRDZ_ACT_AUX>) _param_act_aux,
-		(ParamInt<px4::params::CRDZ_ACT_BTN>) _param_act_btn
+		(ParamInt<px4::params::CRDZ_ACT_BTN>) _param_act_btn,
+		(ParamFloat<px4::params::CRDZ_DIST>) _param_dist,
+		(ParamInt<px4::params::CRDZ_XY_OFF_EN>) _param_xy_offset_enable,
+		(ParamFloat<px4::params::CRDZ_X_OFF>) _param_x_offset,
+		(ParamFloat<px4::params::CRDZ_Y_OFF>) _param_y_offset,
+		(ParamFloat<px4::params::CRDZ_APP_SPD>) _param_app_speed,
+		(ParamFloat<px4::params::CRDZ_SLOW_RAD>) _param_slow_radius,
+		(ParamFloat<px4::params::CRDZ_VSLEW>) _param_velocity_slew,
+		(ParamFloat<px4::params::CRDZ_TPOS_TC>) _param_target_position_tc,
+		(ParamFloat<px4::params::CRDZ_TVEL_TC>) _param_target_velocity_tc,
+		(ParamFloat<px4::params::CRDZ_TPOS_JMP>) _param_target_position_jump,
+		(ParamFloat<px4::params::CRDZ_ALT_DIFF>) _param_alt_diff
 	)
 };

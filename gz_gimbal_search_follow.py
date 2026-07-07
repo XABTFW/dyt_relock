@@ -51,6 +51,14 @@ def parse_args():
     parser.add_argument("--reacquire-speed", type=float, default=50.0, help="local reacquire scan speed in deg/s")
     parser.add_argument("--yaw-sign", type=float, default=1.0, help="set -1 if horizontal tracking moves the wrong way")
     parser.add_argument("--pitch-sign", type=float, default=-1.0, help="set 1 if vertical tracking moves the wrong way")
+    parser.add_argument("--gimbal-state-host", default="127.0.0.1", help="host to send current gimbal state UDP to")
+    parser.add_argument("--gimbal-state-port", type=int, default=15201, help="UDP port to send current gimbal state to")
+    parser.add_argument("--disable-gimbal-state-udp", action="store_true", help="disable sending current gimbal state over UDP")
+    parser.add_argument("--forward-yaw", type=float, default=0.0, help="forward-hold yaw in deg when not armed")
+    parser.add_argument("--forward-pitch", type=float, default=0.0, help="forward-hold pitch in deg when not armed")
+    parser.add_argument("--arm-timeout", type=float, default=0.5, help="max age of the armed flag before treating gimbal as disarmed")
+    parser.add_argument("--search-on-arm", action="store_true", help="scan for the target after arming while it is not yet locked")
+    parser.add_argument("--ignore-arm", action="store_true", help="ignore the armed flag and track whenever locked (legacy behaviour)")
     parser.add_argument("--dry-run", action="store_true", help="print commands without publishing to Gazebo")
     return parser.parse_args()
 
@@ -145,6 +153,33 @@ class GzPublisher:
             self._warned = True
 
 
+class GimbalStateSender:
+    def __init__(self, host, port):
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._addr = (host, port)
+        self._warned = False
+
+    def send(self, yaw_deg, pitch_deg):
+        msg = {
+            "gimbal_yaw_deg": float(yaw_deg),
+            "gimbal_pitch_deg": float(pitch_deg),
+            "timestamp": time.time(),
+        }
+
+        try:
+            self._sock.sendto(
+                json.dumps(msg, separators=(",", ":")).encode("utf-8"),
+                self._addr,
+            )
+        except OSError as exc:
+            if not self._warned:
+                print(f"gimbal state UDP send failed: {exc}", file=sys.stderr)
+                self._warned = True
+
+    def close(self):
+        self._sock.close()
+
+
 class TargetReceiver:
     def __init__(self, bind_addr, port):
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -153,6 +188,7 @@ class TargetReceiver:
         self.valid = False
         self.los_x_rad = 0.0
         self.los_y_rad = 0.0
+        self.armed = False
         self.last_update = 0.0
         self.last_valid_update = 0.0
 
@@ -168,6 +204,9 @@ class TargetReceiver:
     def fresh(self, now, timeout_s):
         return self.valid and (now - self.last_update) <= timeout_s
 
+    def armed_fresh(self, now, timeout_s):
+        return self.armed and (now - self.last_update) <= timeout_s
+
     def valid_age(self, now):
         if self.last_valid_update <= 0.0:
             return float("inf")
@@ -175,6 +214,8 @@ class TargetReceiver:
         return now - self.last_valid_update
 
     def _parse(self, text):
+        armed = self.armed
+
         try:
             msg = json.loads(text)
             valid = bool(msg.get("valid", msg.get("target_valid", False)))
@@ -188,6 +229,9 @@ class TargetReceiver:
                 los_y = float(msg["los_y_rad"])
             else:
                 los_y = math.radians(float(msg.get("los_y_deg", 0.0)))
+
+            if "armed" in msg:
+                armed = bool(msg["armed"])
 
         except (ValueError, TypeError, json.JSONDecodeError):
             parts = text.replace(",", " ").split()
@@ -205,6 +249,7 @@ class TargetReceiver:
         self.valid = valid
         self.los_x_rad = los_x
         self.los_y_rad = los_y
+        self.armed = armed
         self.last_update = time.monotonic()
 
         if valid:
@@ -296,7 +341,25 @@ def main():
     else:
         print(f"listening for target offsets on udp://{args.udp_bind}:{args.udp_port}", flush=True)
 
+    if args.ignore_arm:
+        print("arm gate ignored; tracking whenever the target is locked (legacy behaviour)", flush=True)
+    else:
+        print(
+            f"forward-hold until armed (yaw={args.forward_yaw:+.1f}deg pitch={args.forward_pitch:+.1f}deg); "
+            f"follow only when armed and locked; search-on-arm={'on' if args.search_on_arm else 'off'}",
+            flush=True,
+        )
+
     publisher = GzPublisher(args.gz_bin, yaw_topic, pitch_topic, args.dry_run)
+    gimbal_state_sender = None if args.disable_gimbal_state_udp else GimbalStateSender(
+        args.gimbal_state_host, args.gimbal_state_port
+    )
+    if gimbal_state_sender is not None:
+        print(
+            f"sending current gimbal state to udp://{args.gimbal_state_host}:{args.gimbal_state_port}",
+            flush=True,
+        )
+
     target = None if args.no_target_udp else TargetReceiver(args.udp_bind, args.udp_port)
     search = SearchPattern(args)
     reacquire = LocalReacquirePattern(args)
@@ -316,7 +379,19 @@ def main():
         if target is not None:
             target.poll()
 
-        if target is not None and target.fresh(now, args.target_timeout):
+        armed = args.ignore_arm or (target is not None and target.armed_fresh(now, args.arm_timeout))
+        allow_search = args.search_on_arm or args.ignore_arm
+
+        if not armed:
+            search.set_pose(args.forward_yaw, args.forward_pitch)
+            reacquire.clear()
+            last_yaw_correction = 0.0
+            last_pitch_correction = 0.0
+            last_lock_yaw = search.yaw
+            last_lock_pitch = search.pitch
+            mode = "fwd"
+
+        elif target is not None and target.fresh(now, args.target_timeout):
             yaw_correction = args.yaw_sign * math.degrees(target.los_x_rad) * args.follow_gain
             pitch_correction = args.pitch_sign * math.degrees(target.los_y_rad) * args.follow_gain
             yaw_correction = clamp(yaw_correction, -args.max_follow_step, args.max_follow_step)
@@ -339,7 +414,7 @@ def main():
             search.set_pose(yaw, pitch)
             mode = "coast"
 
-        elif target is not None and target.valid_age(now) <= args.reacquire_timeout:
+        elif allow_search and target is not None and target.valid_age(now) <= args.reacquire_timeout:
             if not reacquire.active():
                 reacquire.reset(last_lock_yaw, last_lock_pitch, now)
 
@@ -347,15 +422,30 @@ def main():
             search.set_pose(yaw, pitch)
             mode = "reacq"
 
-        else:
+        elif allow_search:
             reacquire.clear()
             yaw, pitch = search.update(dt)
             mode = "search"
 
+        else:
+            reacquire.clear()
+            search.set_pose(args.forward_yaw, args.forward_pitch)
+            last_yaw_correction = 0.0
+            last_pitch_correction = 0.0
+            mode = "hold"
+
         publisher.publish(search.yaw, search.pitch)
 
+        if gimbal_state_sender is not None:
+            gimbal_state_sender.send(search.yaw, search.pitch)
+
         if now - last_log > 1.0:
-            print(f"{mode:6s} yaw={search.yaw:+7.2f}deg pitch={search.pitch:+7.2f}deg", flush=True)
+            locked = target is not None and target.fresh(now, args.target_timeout)
+            print(
+                f"{mode:6s} armed={int(armed)} locked={int(locked)} "
+                f"yaw={search.yaw:+7.2f}deg pitch={search.pitch:+7.2f}deg",
+                flush=True,
+            )
             last_log = now
 
         sleep_s = period - (time.monotonic() - now)

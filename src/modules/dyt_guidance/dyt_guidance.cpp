@@ -300,6 +300,7 @@ private:
 		(ParamInt<px4::params::DYTG_ACT_AUX>) _param_act_aux,
 		(ParamInt<px4::params::DYTG_ACT_BTN>) _param_act_btn,
 		(ParamInt<px4::params::DYTG_INT_AUX>) _param_int_aux,
+		(ParamInt<px4::params::DYTG_INT_BTN>) _param_int_btn,
 		(ParamInt<px4::params::DYTG_COOP_EN>) _param_coop_enable,
 		(ParamInt<px4::params::DYTG_GEO_EN>) _param_midcourse_geo_enable,
 		(ParamInt<px4::params::CRDZ_ACT_AUX>) _param_midcourse_act_aux,
@@ -476,6 +477,10 @@ void DytGuidance::show_status()
 		 static_cast<unsigned>(_manual_control.sticks_moving));
 	PX4_INFO("activation aux: %ld", static_cast<long>(_param_act_aux.get()));
 	PX4_INFO("intercept aux: %ld", static_cast<long>(_param_int_aux.get()));
+	PX4_INFO("intercept button: %ld held=%d buttons=0x%04x",
+		 static_cast<long>(_param_int_btn.get()),
+		 static_cast<int>(button_active(_param_int_btn.get())),
+		 static_cast<unsigned>(_manual_control.buttons));
 	PX4_INFO("home angle: yaw=%.1f pitch=%.1f",
 		 static_cast<double>(_param_home_yaw_deg.get()),
 		 static_cast<double>(_param_home_pitch_deg.get()));
@@ -2143,7 +2148,11 @@ void DytGuidance::Run()
 	const bool activation_request = activation_requested();
 	const bool midcourse_pointing_request = midcourse_pointing_requested();
 	const bool auto_activation_enabled = _param_auto_enable.get() > 0;
-	const bool intercept_request = aux_switch_active(_param_int_aux.get());
+
+	// Intercept is a hold-to-engage command: it stays active only while the AUX switch
+	// (DYTG_INT_AUX) is on or the button (DYTG_INT_BTN) is held. Releasing it drops back
+	// to follow, so the operator can abort the intercept at any time by letting go.
+	const bool intercept_request = aux_switch_active(_param_int_aux.get()) || button_active(_param_int_btn.get());
 
 	if (auto_activation_enabled) {
 		if (activation_request) {

@@ -47,6 +47,23 @@ PARAM_DEFINE_INT32(DYTG_ACT_BTN, -1);
 PARAM_DEFINE_INT32(DYTG_INT_AUX, 2);
 
 /**
+ * Intercept joystick button
+ *
+ * Commands the transition from follow to intercept using the MANUAL_CONTROL
+ * buttons bitmask. Button numbers match the zero-based numbering shown by
+ * QGroundControl. Hold-to-engage: intercept is active only while the button is
+ * held and reverts to follow as soon as it is released, so the operator can
+ * abort the intercept at any time by letting go. The DYTG_INT_AUX switch works
+ * as a level input in parallel.
+ *
+ * @value -1 Disabled
+ * @min -1
+ * @max 15
+ * @group DYT Guidance
+ */
+PARAM_DEFINE_INT32(DYTG_INT_BTN, -1);
+
+/**
  * Cooperative rendezvous handoff enable
  *
  * When enabled, the DYT seeker only commands aircraft motion (trajectory /
